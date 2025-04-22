@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Hotkey Router Playground</title>
+  <style>
+    body { font-family: sans-serif; padding: 2em; }
+    .hotkey { margin: 0.5em 0; }
+    .log { margin-top: 1em; background: #f3f3f3; padding: 1em; max-height: 150px; overflow-y: auto; font-family: monospace; }
+    .log-entry { margin-bottom: 0.25em; }
+    input[type="text"] { width: 200px; padding: 4px; }
+    select, button { padding: 4px; }
+  </style>
+</head>
+<body>
+
+  <h1>Hotkey Playground</h1>
+
+  <div>
+    <label>Choose Action:</label>
+    <select id="actionSelect">
+      <option value="logHello">Log: Hello</option>
+      <option value="alertTime">Alert: Time</option>
+      <option value="toggleBox">Toggle Box</option>
+    </select>
+  </div>
+
+  <div class="hotkey">
+    <label>Hotkey:</label>
+    <input type="text" id="hotkeyInput" placeholder="e.g. ctrl+shift+h or alt+x up" />
+    <button id="bindBtn">Bind</button>
+  </div>
+
+  <div>
+    <h3>Bound Hotkeys:</h3>
+    <ul id="bindingsList"></ul>
+  </div>
+
+  <div id="demoBox" style="display:none; border:1px solid #ccc; padding:1em; margin-top:1em;">
+    I'm a demo box! Use hotkeys to toggle me.
+  </div>
+
+  <div class="log">
+    <strong>Log Output:</strong>
+    <div id="log"></div>
+  </div>
+
+  <script type="module">
+    import hotkeys from '../hotkey-router.js'
+
+    const actionSelect = document.getElementById('actionSelect')
+    const hotkeyInput = document.getElementById('hotkeyInput')
+    const bindBtn = document.getElementById('bindBtn')
+    const bindingsList = document.getElementById('bindingsList')
+    const logOutput = document.getElementById('log')
+    const demoBox = document.getElementById('demoBox')
+
+    const actions = {
+      logHello: () => log('Hello from hotkey!'),
+      alertTime: () => alert(new Date().toLocaleTimeString()),
+      toggleBox: () => {
+        demoBox.style.display = demoBox.style.display === 'none' ? 'block' : 'none'
+        log('Toggled the demo box')
+      }
+    }
+
+    const log = (msg) => {
+      const entry = document.createElement('div')
+      entry.className = 'log-entry'
+      entry.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`
+      logOutput.prepend(entry)
+    }
+
+    const bindings = []
+
+    bindBtn.addEventListener('click', () => {
+      const key = hotkeyInput.value.trim().toLowerCase()
+      const actionKey = actionSelect.value
+
+      if (!key || !actions[actionKey]) {
+        alert('Invalid input or action.')
+        return
+      }
+
+      hotkeys.bind(key, actions[actionKey])
+      bindings.push({ key, action: actionKey })
+
+      const li = document.createElement('li')
+      li.textContent = `${key} → ${actionKey}`
+      bindingsList.appendChild(li)
+
+      log(`Bound ${key} to ${actionKey}`)
+      hotkeyInput.value = ''
+    })
+
+    // Pre-binds
+    hotkeys.bind('ctrl+h', actions.logHello)
+    hotkeys.bind('ctrl+shift+t up', actions.toggleBox)
+    bindings.push({ key: 'ctrl+h', action: 'logHello' })
+    bindings.push({ key: 'ctrl+shift+t up', action: 'toggleBox' })
+
+    const defaultLi = document.createElement('li')
+    defaultLi.textContent = `ctrl+h → logHello`
+    bindingsList.appendChild(defaultLi)
+
+    const upLi = document.createElement('li')
+    upLi.textContent = `ctrl+shift+t up → toggleBox`
+    bindingsList.appendChild(upLi)
+  </script>
+</body>
+</html>
