@@ -3,6 +3,15 @@
 import { on } from 'on-events'
 
 
+
+// const modifierKeyPrefix =
+//   navigator.platform.startsWith("Mac") || navigator.platform === "iPhone"
+//     ? "⌘" // command key
+//     : "^"; // control key
+
+
+
+
 // --- key alias map ---
 const keyAliases = {
     esc: 'escape',
