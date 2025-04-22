@@ -1,0 +1,47 @@
+
+A tiny library to declaratively map keyboard shortcuts to handler routes.
+Plugins (or app modules) can register their own hotkeys cleanly.
+
+
+## Declarative Binding
+hotkeys.bind('ctrl+k', () => openCommandPalette())
+hotkeys.bind('shift+a', () => archiveItem())
+
+
+
+## Composable Plugin Registration
+
+hotkeys.registerPlugin('file-browser', {
+  'ctrl+o': () => openFile(),
+  'ctrl+d': () => deleteFile(),
+})
+
+
+
+## Temporarily disable handlers:
+
+hotkeys.pause()
+hotkeys.resume()
+
+
+
+## Tentative API
+
+import hotkeys from 'hotkey-router'
+
+// Bind global
+hotkeys.bind('ctrl+k', () => console.log('palette'))
+
+// Group bindings
+hotkeys.registerPlugin('search', {
+  'ctrl+f': () => openSearch(),
+  'esc': () => closeSearch()
+})
+
+// Remove
+hotkeys.unbind('ctrl+k')
+hotkeys.unregisterPlugin('search')
+
+// State
+hotkeys.pause()
+hotkeys.resume()
