@@ -1,5 +1,7 @@
 // hotkey-router.js
 
+import { on } from 'on-events'
+
 
 // --- key alias map ---
 const keyAliases = {
@@ -17,15 +19,12 @@ let ignoreEditable = true
 
 
 // --- core parser + matcher ---
-function parseHotkey(hotkey) {
-    const parts = hotkey.toLowerCase().split('+')
-    const combo = {
-        ctrl: false,
-        shift: false,
-        alt: false,
-        meta: false,
-        key: null,
-    }
+function parseHotkey(hotkeyStr) {
+    const isUp = hotkeyStr.trim().toLowerCase().endsWith(' up')
+    const cleanStr = isUp ? hotkeyStr.slice(0, -3).trim() : hotkeyStr
+    const parts = cleanStr.toLowerCase().split('+')
+    const combo = { ctrl: false, shift: false, alt: false, meta: false, key: null }
+  
 
     for (const part of parts) {
         const actual = keyAliases[part] || part
@@ -36,7 +35,7 @@ function parseHotkey(hotkey) {
         else combo.key = actual
     }
 
-    return combo
+    return { combo, type: isUp ? 'keyup' : 'keydown' }
 }
 
 function matchesHotkey(event, combo) {
@@ -66,36 +65,50 @@ function comboKey(combo) {
 }
 
 // --- binding engine ---
-function bind(hotkey, handler, plugin = null) {
-    const combo = parseHotkey(hotkey)
+function bind(hotkeyStr, handler, plugin = null) {
+    const { combo, type } = parseHotkey(hotkeyStr)
     const key = comboKey(combo)
-    registry.set(key, { combo, handler, plugin, raw: hotkey })
-}
-
-function unbind(hotkey) {
-    const combo = parseHotkey(hotkey)
-    registry.delete(comboKey(combo))
-}
-
+    if (!registry.has(key)) registry.set(key, new Map())
+    registry.get(key).set(type, { combo, handler, plugin, raw: hotkeyStr })
+  }
+  
+  function unbind(hotkeyStr) {
+    const { combo, type } = parseHotkey(hotkeyStr)
+    const key = comboKey(combo)
+    const entry = registry.get(key)
+    if (entry) {
+      entry.delete(type)
+      if (!entry.size) registry.delete(key)
+    }
+  }
+  
 // --- plugin system ---
 function registerPlugin(name, hotkeyMap) {
     if (plugins.has(name)) throw new Error(`Plugin "${name}" already registered`)
-    const entries = Object.entries(hotkeyMap)
     const keys = []
-    for (const [hotkey, fn] of entries) {
-        bind(hotkey, fn, name)
-        keys.push(comboKey(parseHotkey(hotkey)))
+    for (const [hotkeyStr, fn] of Object.entries(hotkeyMap)) {
+      bind(hotkeyStr, fn, name)
+      const { combo, type } = parseHotkey(hotkeyStr)
+      keys.push(`${comboKey(combo)}::${type}`)
     }
     plugins.set(name, keys)
-}
+  }
 
 function unregisterPlugin(name) {
     const keys = plugins.get(name)
     if (keys) {
-        for (const key of keys) registry.delete(key)
-        plugins.delete(name)
+      for (const fullKey of keys) {
+        const [comboStr, type] = fullKey.split('::')
+        const entry = registry.get(comboStr)
+        if (entry) {
+          entry.delete(type)
+          if (!entry.size) registry.delete(comboStr)
+        }
+      }
+      plugins.delete(name)
     }
-}
+  }
+  
 
 // --- control ---
 function pause() {
@@ -109,37 +122,48 @@ function ignoreInput(value = true) {
     ignoreEditable = !!value
 }
 
-// --- main event listener ---
-window.addEventListener('keydown', (e) => {
-    if (paused) return
 
-    if (ignoreEditable) {
-        const tag = e.target.tagName
-        const editable = (
-            e.target.isContentEditable ||
-            tag === 'INPUT' ||
-            tag === 'TEXTAREA' ||
-            e.target.getAttribute('role') === 'textbox'
-        )
-        if (editable) return
-    }
+function isFromInputTarget(e) {
+    const tag = e.target.tagName
+    return (
+      e.target.isContentEditable ||
+      tag === 'INPUT' ||
+      tag === 'TEXTAREA' ||
+      e.target.getAttribute('role') === 'textbox'
+    )
+  }
 
-    for (const [_, { combo, handler }] of registry) {
-        if (matchesHotkey(e, combo)) {
-            handler(e)
-            break
+
+  // --- dual listeners via On(Events) ---
+function handleEvent(type) {
+    return (e) => {
+      if (paused) return
+      if (ignoreEditable && isFromInputTarget(e)) return
+  
+      for (const [comboStr, typeMap] of registry) {
+        const entry = typeMap.get(type)
+        if (entry && matchesHotkey(e, entry.combo)) {
+          entry.handler(e)
+          break
         }
+      }
     }
-})
+  }
+  
 
+
+// --- main event listener ---
+const stopDown = on(window, 'keydown', handleEvent('keydown'))
+const stopUp = on(window, 'keyup', handleEvent('keyup'))
 
 
 // --- optional cleanup ---
 function destroy() {
-    stopGlobal()
+    stopDown()
+    stopUp()
     registry.clear()
     plugins.clear()
-}
+  }
 
 
 // --- public API ---
