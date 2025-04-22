@@ -1,17 +1,19 @@
 # hotkey-router
 
 **Plugin-first keyboard shortcut router for the modern web.**  
-Register hotkeys declaratively, group them by plugin/module, and control routing — with zero dependencies.
+Register hotkeys declaratively, group them by plugin/module, and control routing — with `keydown` and `keyup` support.
 
 ---
 
 ## Features
 
-- `bind('ctrl+k', fn)` – register a global shortcut
-- `registerPlugin('name', { 'shift+a': fn })` – scoped plugin bindings
-- `pause()` / `resume()` – temporary hotkey suppression
-- `unregisterPlugin('name')` – clean plugin teardown
-- < 2KB, no dependencies, works in all modern browsers
+- `bind('ctrl+k', fn)` — bind keydown events
+- `bind('ctrl+p up', fn)` — bind `keyup` events with `" up"` suffix
+- `registerPlugin(name, map)` — group hotkeys by plugin/module
+- `pause()` / `resume()` — temporarily suspend all hotkeys
+- `ignoreInput(true)` — prevent hotkeys from triggering inside inputs
+- `destroy()` — clean teardown
+- Tiny (<2.5KB), modern, and dependency-free
 
 ---
 
@@ -21,7 +23,7 @@ Register hotkeys declaratively, group them by plugin/module, and control routing
 npm install hotkey-router
 ```
 
-Or load via CDN (ESM):
+Or use via CDN:
 
 ```js
 import hotkeys from 'https://cdn.skypack.dev/hotkey-router'
@@ -34,90 +36,103 @@ import hotkeys from 'https://cdn.skypack.dev/hotkey-router'
 ```js
 import hotkeys from 'hotkey-router'
 
-// Bind a global shortcut
 hotkeys.bind('ctrl+k', () => {
-  console.log('Open Command Palette')
+  console.log('Command palette')
 })
 
-// Register hotkeys via plugin
-hotkeys.registerPlugin('file-browser', {
-  'ctrl+o': () => console.log('Open file'),
-  'ctrl+d': () => console.log('Delete file')
+hotkeys.bind('ctrl+p up', () => {
+  console.log('Released CTRL+P')
 })
 
-// Temporarily pause all hotkeys
-hotkeys.pause()
-
-// Resume listening
-hotkeys.resume()
-
-// Remove a plugin's hotkeys
-hotkeys.unregisterPlugin('file-browser')
+hotkeys.registerPlugin('docs', {
+  'ctrl+f': () => console.log('Find'),
+  'escape': () => console.log('Cancel'),
+  'ctrl+shift+s up': () => console.log('Released save combo')
+})
 ```
 
 ---
 
 ## API
 
-### `hotkeys.bind(hotkey: string, handler: fn, plugin?: string)`
+### `hotkeys.bind(hotkey: string, handler: function, plugin?: string)`
 
-Bind a keyboard shortcut directly. You can optionally associate it with a plugin for grouping.
+Register a global hotkey.  
+Suffix `" up"` to bind to `keyup` instead of `keydown`.
+
+- `hotkeys.bind('ctrl+k', fn)` → keydown
+- `hotkeys.bind('ctrl+k up', fn)` → keyup
 
 ---
 
 ### `hotkeys.unbind(hotkey: string)`
 
-Remove a previously bound hotkey by its string (e.g. `'ctrl+k'`).
+Unbind a previously registered shortcut.
 
 ---
 
-### `hotkeys.registerPlugin(name: string, keyMap: { [hotkey]: fn })`
+### `hotkeys.registerPlugin(name: string, map: { [hotkey]: fn })`
 
-Register multiple hotkeys under a plugin name. Enables easy scoping, teardown, and overrides.
+Batch register hotkeys under a plugin namespace.
+
+```js
+hotkeys.registerPlugin('nav', {
+  'ctrl+1': () => switchTab(1),
+  'ctrl+2 up': () => console.log('Tab 2 released')
+})
+```
 
 ---
 
 ### `hotkeys.unregisterPlugin(name: string)`
 
-Remove all hotkeys associated with a given plugin.
+Remove all hotkeys associated with a plugin.
 
 ---
 
 ### `hotkeys.pause()` / `hotkeys.resume()`
 
-Temporarily stop hotkeys from firing (e.g. when focus is inside a text input or modal).
+Temporarily disable or re-enable all hotkey handling.
 
 ---
 
-### (Optional) `hotkeys.destroy()`
+### `hotkeys.ignoreInput(boolean = true)`
 
-Remove all hotkeys and the internal event listener — useful for full teardown in SPA or widget environments.
+Prevents hotkeys from firing while user is typing inside:
 
----
+- `<input>`
+- `<textarea>`
+- `[contenteditable]`
+- Elements with `role="textbox"`
 
-## Example Combos
-
-```js
-hotkeys.bind('ctrl+shift+x', () => ...)
-hotkeys.bind('meta+s', () => ...)      // Mac ⌘+S
-hotkeys.bind('alt+enter', () => ...)
-hotkeys.bind('esc', () => ...)
-```
+This is enabled by default.
 
 ---
 
-## Limitations
+### `hotkeys.destroy()`
 
-- Only listens to `keydown` events
-- Keys are compared case-insensitively
-- Does not handle IME or input focus context (yet)
+Removes all hotkeys and internal event listeners.  
+Useful for single-page apps or dynamic cleanup.
+
+---
+
+## Supported Keys & Aliases
+
+| Shorthand | Mapped To   |
+|-----------|-------------|
+| `esc`     | `escape`    |
+| `space`   | `' '`       |
+| `del`     | `delete`    |
+| `mod`     | `meta` on macOS, `ctrl` otherwise |
+
+All keys are case-insensitive. For example, `'A'` and `'a'` both match `'a'`.
 
 ---
 
 ## Browser Support
 
-Modern browsers (Chrome, Firefox, Safari, Edge).  
-Requires `KeyboardEvent.key`, `addEventListener`, and `Map`.
+Modern browsers: Chrome, Firefox, Safari, Edge.  
+Requires `KeyboardEvent.key`, `Map`, and `addEventListener`.
 
 ---
 
