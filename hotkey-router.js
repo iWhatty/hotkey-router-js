@@ -1,5 +1,11 @@
 // hotkey-router.js
 // Hotkey Router — plugin-first keyboard shortcut router (tiny + predictable)
+//
+// Goals:
+// - O(1) dispatch by combo string lookup
+// - Deterministic routing: highest priority wins; ties -> most recently bound wins
+// - Safe plugin cleanup (never deletes other plugins’ bindings)
+// - Modern browser target (KeyboardEvent.key + addEventListener)
 
 // --- tiny event helper ---
 function on(target, type, fn, options) {
@@ -65,22 +71,9 @@ let nextId = 1
 
 // --- helpers ---
 function normalizeKey(key) {
-  // Normalize common variants + casing.
-  // Keep single characters as-is (but lowercased).
   const raw = String(key ?? '').trim()
   const k = raw.toLowerCase()
-
-  // Normalize old/odd names through aliases
-  if (keyAliases[k] != null) return keyAliases[k]
-
-  // Normalize arrows
-  if (k === 'arrowup' || k === 'arrowdown' || k === 'arrowleft' || k === 'arrowright') return k
-
-  // Normalize space from some environments (already handled via alias, but keep here)
-  if (raw === ' ') return ' '
-
-  // Use lower case for everything else
-  return k
+  return keyAliases[k] ?? (raw === ' ' ? ' ' : k)
 }
 
 function comboKeyFromParts({ ctrl, shift, alt, meta, key }) {
@@ -96,38 +89,27 @@ function comboKeyFromParts({ ctrl, shift, alt, meta, key }) {
 }
 
 function comboKeyFromEvent(e) {
-  const key = normalizeKey(e.key)
   return comboKeyFromParts({
     ctrl: e.ctrlKey,
     shift: e.shiftKey,
     alt: e.altKey,
     meta: e.metaKey,
-    key,
+    key: normalizeKey(e.key),
   })
 }
 
-// Supports:
-//  - "ctrl+k"
-//  - "ctrl+k up"
-//  - "ctrl++" (plus key)
-//  - "ctrl+plus" (alias)
-//  - "mod+k"
 function parseHotkey(hotkeyStr) {
   const raw = String(hotkeyStr || '').trim()
   const lower = raw.toLowerCase()
+
   const isUp = lower.endsWith(' up')
   const cleanStr = (isUp ? raw.slice(0, -3) : raw).trim().toLowerCase()
 
-  // Special case: allow "ctrl++" to mean key "+"
-  // split('+') would lose empties, so handle by parsing tokens manually.
-  // Strategy: tokenize modifiers first, then treat last token as key.
-  // We'll still support the standard "a+b+c" shape.
+  // Allow: "ctrl++" to mean base key "+"
+  // `split('+')` produces empties; we keep that signal.
   const rawParts = cleanStr.split('+').map((p) => p.trim())
-  const parts = rawParts.filter((p) => p.length > 0)
-
-  // If user wrote "ctrl++", rawParts becomes ["ctrl", "", ""], parts becomes ["ctrl"]
-  // In that case key should be "+"
-  const impliedPlusKey = rawParts.length > parts.length && cleanStr.includes('++')
+  const parts = rawParts.filter(Boolean)
+  const impliedPlusKey = rawParts.some((p) => p === '') && cleanStr.includes('++')
 
   const combo = { ctrl: false, shift: false, alt: false, meta: false, key: null }
 
@@ -141,10 +123,7 @@ function parseHotkey(hotkeyStr) {
   }
 
   if (!combo.key && impliedPlusKey) combo.key = '+'
-
-  if (!combo.key) {
-    throw new Error(`Invalid hotkey "${hotkeyStr}" (missing base key)`)
-  }
+  if (!combo.key) throw new Error(`Invalid hotkey "${hotkeyStr}" (missing base key)`)
 
   return { combo, type: isUp ? 'keyup' : 'keydown', raw: hotkeyStr }
 }
@@ -169,25 +148,31 @@ function isFromInputTarget(e) {
 //  when(e) -> boolean (gate)
 //  allowIn(e) -> boolean (override ignoreInput)
 //  priority (higher wins)
-//  target (override defaultTarget)
-//  capture (listener option; global default is bubble)
 function normalizeOptions(type, options) {
   const o = options ? { ...options } : {}
-  if (type === 'keydown' && o.repeat == null) o.repeat = false // dream default
+  if (type === 'keydown' && o.repeat == null) o.repeat = false
   if (o.priority == null) o.priority = 0
   return o
 }
 
 function ensureSlot(comboStr, type) {
-  if (!registry.has(comboStr)) registry.set(comboStr, new Map())
-  const typeMap = registry.get(comboStr)
-  if (!typeMap.has(type)) typeMap.set(type, [])
-  return typeMap.get(type)
+  let typeMap = registry.get(comboStr)
+  if (!typeMap) {
+    typeMap = new Map()
+    registry.set(comboStr, typeMap)
+  }
+  let arr = typeMap.get(type)
+  if (!arr) {
+    arr = []
+    typeMap.set(type, arr)
+  }
+  return arr
 }
 
 function removeById(id) {
   const idx = bindingIndex.get(id)
   if (!idx) return false
+
   const { comboStr, type } = idx
   const typeMap = registry.get(comboStr)
   const arr = typeMap?.get(type)
@@ -206,7 +191,7 @@ function removeById(id) {
 }
 
 // --- public API: bind / unbind ---
-// bind returns an "off" function (dream ergonomics)
+// bind returns an off() function; off.id is exposed for plugin bookkeeping.
 function bind(hotkeyStr, handler, plugin = null, options = {}) {
   const { combo, type, raw } = parseHotkey(hotkeyStr)
   const comboStr = comboKeyFromParts(combo)
@@ -226,8 +211,10 @@ function bind(hotkeyStr, handler, plugin = null, options = {}) {
   ensureSlot(comboStr, type).push(binding)
   bindingIndex.set(binding.id, { comboStr, type })
 
-  // off() convenience
-  return () => removeById(binding.id)
+  const off = () => removeById(binding.id)
+  off.id = binding.id
+  off.hotkey = raw
+  return off
 }
 
 // unbind('ctrl+k') -> remove all for that combo/type
@@ -238,14 +225,13 @@ function unbind(hotkeyStr, handler) {
   const typeMap = registry.get(comboStr)
   if (!typeMap) return
 
+  const arr = typeMap.get(type)
+  if (!arr?.length) return
+
   if (!handler) {
-    // remove all handlers for combo/type
-    const arr = typeMap.get(type) || []
     for (const b of arr) bindingIndex.delete(b.id)
     typeMap.delete(type)
   } else {
-    const arr = typeMap.get(type)
-    if (!arr?.length) return
     const keep = []
     for (const b of arr) {
       if (b.handler === handler) bindingIndex.delete(b.id)
@@ -259,25 +245,15 @@ function unbind(hotkeyStr, handler) {
 }
 
 // --- plugin system ---
-// registerPlugin returns unregister function (dream ergonomics)
+// registerPlugin returns unregister function.
 function registerPlugin(name, hotkeyMap) {
   if (plugins.has(name)) throw new Error(`Plugin "${name}" already registered`)
   const ids = []
 
   for (const [hotkeyStr, fnOrTuple] of Object.entries(hotkeyMap)) {
-    // support: { 'ctrl+k': fn } OR { 'ctrl+k': [fn, options] }
     const [fn, options] = Array.isArray(fnOrTuple) ? fnOrTuple : [fnOrTuple, {}]
     const off = bind(hotkeyStr, fn, name, options)
-
-    // capture id by reading nextId-1 is brittle; instead, store via bindingIndex in bind return?
-    // We'll just store off functions indirectly by storing binding ids.
-    // So: re-bind but keep id from off isn't exposed.
-    // Instead: call bind and record the latest id.
-    // (We can do this safely since bind increments nextId synchronously.)
-    ids.push(nextId - 1)
-
-    // if consumer wants, they can keep `off` too
-    void off
+    ids.push(off.id)
   }
 
   plugins.set(name, ids)
@@ -302,16 +278,15 @@ function ignoreInput(value = true) {
   ignoreEditable = !!value
 }
 
-// allow changing the listener target (handy for iframes, shadow roots, tests)
+// allow changing the default target (iframes/tests).
+// we intentionally do not auto-rebind to keep the core tiny.
 function setTarget(target) {
   defaultTarget = target
-  // NOTE: we don't auto-rebind listeners here to keep it tiny; call destroy()+init() pattern if needed.
 }
 
 // --- dispatch (O(1) lookup) ---
 function pickWinner(bindings) {
-  // Highest priority wins; if tied, newest wins (last registered).
-  // This makes "modal bind" overrides easy: register later or set higher priority.
+  // Highest priority wins; ties -> newest wins (largest id).
   let best = null
   for (const b of bindings) {
     if (!best) best = b
@@ -325,23 +300,18 @@ function handleEvent(type) {
   return (e) => {
     if (paused) return
 
-    // ignore inputs unless an allowed binding is explicitly permitting it
     const fromInput = ignoreEditable && isFromInputTarget(e)
-
     const comboStr = comboKeyFromEvent(e)
-    const typeMap = registry.get(comboStr)
-    const bindings = typeMap?.get(type)
+
+    const bindings = registry.get(comboStr)?.get(type)
     if (!bindings?.length) return
 
-    // filter by gates
     const candidates = []
     for (const b of bindings) {
       const o = b.options
-
       if (fromInput && !o.allowIn?.(e)) continue
       if (type === 'keydown' && o.repeat === false && e.repeat) continue
       if (o.when && o.when(e) === false) continue
-
       candidates.push(b)
     }
     if (!candidates.length) return
@@ -365,7 +335,6 @@ let stopUp = null
 
 function init({ target = defaultTarget, capture = false } = {}) {
   if (!target) throw new Error('hotkeys.init() requires a target (e.g. window)')
-  // idempotent-ish
   if (stopDown || stopUp) destroy()
 
   stopDown = on(target, 'keydown', handleEvent('keydown'), { capture })
@@ -387,11 +356,10 @@ function trigger(hotkeyStr, { type: forcedType } = {}) {
   const { combo, type } = parseHotkey(hotkeyStr)
   const comboStr = comboKeyFromParts(combo)
   const actualType = forcedType || type
-  const typeMap = registry.get(comboStr)
-  const bindings = typeMap?.get(actualType)
+
+  const bindings = registry.get(comboStr)?.get(actualType)
   if (!bindings?.length) return false
 
-  // Fake minimal event shape; handlers can still read modifier flags + key.
   const e = {
     type: actualType,
     key: combo.key,
@@ -400,9 +368,9 @@ function trigger(hotkeyStr, { type: forcedType } = {}) {
     altKey: !!combo.alt,
     metaKey: !!combo.meta,
     repeat: false,
-    preventDefault() {},
-    stopPropagation() {},
-    stopImmediatePropagation() {},
+    preventDefault() { },
+    stopPropagation() { },
+    stopImmediatePropagation() { },
     target: null,
   }
 
@@ -410,12 +378,13 @@ function trigger(hotkeyStr, { type: forcedType } = {}) {
     bindings.filter((b) => (b.options.when ? b.options.when(e) !== false : true))
   )
   if (!winner) return false
+
   winner.handler(e)
   if (winner.options.once) removeById(winner.id)
   return true
 }
 
-// Auto-init on window by default (keeps original ergonomics)
+// Auto-init on window by default (keeps ergonomics)
 if (defaultTarget) init()
 
 export default {
