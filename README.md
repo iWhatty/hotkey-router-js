@@ -55,6 +55,11 @@ hotkeys.bind('ctrl+p up', () => {
   console.log('Released CTRL+P')
 })
 
+// AHK-style modifiers also supported
+hotkeys.bind('^k', () => {
+  openCommandPalette() // ctrl+k
+})
+
 // Plugin grouping
 hotkeys.registerPlugin('docs', {
   'ctrl+f': openSearch,
@@ -236,11 +241,47 @@ Returns `true` if a handler ran.
 
 # Supported Syntax
 
+### Standard
+
 * `ctrl+k`
 * `shift+a`
 * `ctrl+k up`
 * `mod+s` (meta on macOS, ctrl elsewhere)
 * `ctrl++` or `ctrl+plus`
+
+### AHK-Style Prefix Modifiers
+
+* `^k` → `ctrl+k`
+* `!k` → `alt+k`
+* `+k` → `shift+k`
+* `#k` → `meta+k`
+* `^!k` → `ctrl+alt+k`
+
+Modifiers must appear before the base key.
+
+### Aliases Supported
+
+Modifiers:
+
+* `ctrl`, `control`, `⌃`
+* `shift`, `⇧`, `+`
+* `alt`, `option`, `⌥`, `!`
+* `meta`, `cmd`, `command`, `win`, `⌘`, `#`
+* `mod` (meta on macOS, ctrl elsewhere)
+
+Navigation / Special:
+
+* `escape`, `esc`
+* `enter`, `return`
+* `space`
+* `tab`
+* `backspace`
+* `delete`, `del`
+* `home`, `end`
+* `pageup`, `pgup`
+* `pagedown`, `pgdn`
+* `up`, `down`, `left`, `right`
+* `f1`–`f19`
 
 Keys are case-insensitive.
 

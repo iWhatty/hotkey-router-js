@@ -17,6 +17,17 @@ function on(target, type, fn, options) {
 const isMac =
   typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/.test(navigator.platform)
 
+
+const modifierTokens = new Set(['ctrl', 'shift', 'alt', 'meta'])
+
+const ahkPrefixMap = new Map([
+  ['^', 'ctrl'],  // Ctrl
+  ['!', 'alt'],   // Alt
+  ['+', 'shift'], // Shift
+  ['#', 'meta'],  // Win / Command
+])
+
+
 const keyAliases = {
   // common
   esc: 'escape',
@@ -36,7 +47,15 @@ const keyAliases = {
   left: 'arrowleft',
   right: 'arrowright',
 
-  // modifiers
+  // navigation
+  home: 'home',
+  end: 'end',
+  pageup: 'pageup',
+  pagedown: 'pagedown',
+  pgup: 'pageup',
+  pgdn: 'pagedown',
+
+  // modifiers (words)
   cmd: 'meta',
   command: 'meta',
   win: 'meta',
@@ -46,6 +65,12 @@ const keyAliases = {
   option: 'alt',
   alt: 'alt',
   shift: 'shift',
+
+  // modifiers (symbols)
+  '⌘': 'meta',
+  '⌃': 'ctrl',
+  '⌥': 'alt',
+  '⇧': 'shift',
 
   // cross-platform "mod"
   mod: isMac ? 'meta' : 'ctrl',
@@ -98,21 +123,66 @@ function comboKeyFromEvent(e) {
   })
 }
 
+
+
+function isModifierToken(token) {
+  const normalized = keyAliases[token] || token
+  return modifierTokens.has(normalized)
+}
+
+
+
+
 function parseHotkey(hotkeyStr) {
   const raw = String(hotkeyStr || '').trim()
   const lower = raw.toLowerCase()
 
   const isUp = lower.endsWith(' up')
-  const cleanStr = (isUp ? raw.slice(0, -3) : raw).trim().toLowerCase()
+  let cleanStr = (isUp ? raw.slice(0, -3) : raw).trim().toLowerCase()
 
-  // Allow: "ctrl++" to mean base key "+"
+  // --- AHK-style prefix modifiers ---
+  // Examples:
+  //  ^k   => ctrl+k
+  //  !k   => alt+k
+  //  +k   => shift+k
+  //  #k   => meta+k
+  //  ^!k  => ctrl+alt+k
+  //
+  // This runs BEFORE normal "+" token parsing so it composes cleanly.
+  const combo = { ctrl: false, shift: false, alt: false, meta: false, key: null }
+
+  while (cleanStr.length) {
+    const mod = ahkPrefixMap.get(cleanStr[0])
+    if (!mod) break
+    combo[mod] = true
+    cleanStr = cleanStr.slice(1).trimStart()
+  }
+
+  // Allow: "ctrl++" OR "++" (after stripping AHK '+' shift prefix)
   // `split('+')` produces empties; we keep that signal.
   const rawParts = cleanStr.split('+').map((p) => p.trim())
   const parts = rawParts.filter(Boolean)
   const impliedPlusKey = rawParts.some((p) => p === '') && cleanStr.includes('++')
 
-  const combo = { ctrl: false, shift: false, alt: false, meta: false, key: null }
+  // Enforce: modifiers must come before the base key.
+  // Example: "ctrl+k" ✅  |  "k+ctrl" ❌
+  // We ignore the special "+ key" case (ctrl++) since it has no explicit base token.
+  if (!impliedPlusKey) {
+    let seenBase = false
+    for (const part of parts) {
+      if (isModifierToken(part)) {
+        if (seenBase) {
+          throw new Error(
+            `Invalid hotkey "${hotkeyStr}": modifiers must come before the base key (e.g. "ctrl+k", not "k+ctrl")`
+          )
+        }
+      } else {
+        if (!seenBase) seenBase = true
+      }
+    }
+  }
 
+  // Continue parsing the remaining tokens (words/symbols/aliases)
   for (const part of parts) {
     const actual = keyAliases[part] || part
     if (actual === 'ctrl') combo.ctrl = true
@@ -128,6 +198,9 @@ function parseHotkey(hotkeyStr) {
   return { combo, type: isUp ? 'keyup' : 'keydown', raw: hotkeyStr }
 }
 
+
+
+
 function isFromInputTarget(e) {
   const t = e?.target
   if (!t) return false
@@ -140,6 +213,9 @@ function isFromInputTarget(e) {
     t.getAttribute?.('role') === 'textbox'
   )
 }
+
+
+
 
 // --- binding model ---
 // options:
@@ -155,6 +231,7 @@ function normalizeOptions(type, options) {
   return o
 }
 
+
 function ensureSlot(comboStr, type) {
   let typeMap = registry.get(comboStr)
   if (!typeMap) {
@@ -168,6 +245,7 @@ function ensureSlot(comboStr, type) {
   }
   return arr
 }
+
 
 function removeById(id) {
   const idx = bindingIndex.get(id)
@@ -189,6 +267,7 @@ function removeById(id) {
   bindingIndex.delete(id)
   return true
 }
+
 
 // --- public API: bind / unbind ---
 // bind returns an off() function; off.id is exposed for plugin bookkeeping.
@@ -217,6 +296,7 @@ function bind(hotkeyStr, handler, plugin = null, options = {}) {
   return off
 }
 
+
 // unbind('ctrl+k') -> remove all for that combo/type
 // unbind('ctrl+k', fn) -> remove only that handler
 function unbind(hotkeyStr, handler) {
@@ -243,6 +323,7 @@ function unbind(hotkeyStr, handler) {
 
   if (!typeMap.size) registry.delete(comboStr)
 }
+
 
 // --- plugin system ---
 // registerPlugin returns unregister function.
@@ -284,6 +365,7 @@ function setTarget(target) {
   defaultTarget = target
 }
 
+
 // --- dispatch (O(1) lookup) ---
 function pickWinner(bindings) {
   // Highest priority wins; ties -> newest wins (largest id).
@@ -295,6 +377,7 @@ function pickWinner(bindings) {
   }
   return best
 }
+
 
 function handleEvent(type) {
   return (e) => {
@@ -329,6 +412,7 @@ function handleEvent(type) {
   }
 }
 
+
 // --- listeners ---
 let stopDown = null
 let stopUp = null
@@ -341,6 +425,7 @@ function init({ target = defaultTarget, capture = false } = {}) {
   stopUp = on(target, 'keyup', handleEvent('keyup'), { capture })
 }
 
+
 function destroy() {
   stopDown?.()
   stopUp?.()
@@ -350,6 +435,7 @@ function destroy() {
   plugins.clear()
   bindingIndex.clear()
 }
+
 
 // --- programmatic trigger (tests / automation) ---
 function trigger(hotkeyStr, { type: forcedType } = {}) {
@@ -383,6 +469,7 @@ function trigger(hotkeyStr, { type: forcedType } = {}) {
   if (winner.options.once) removeById(winner.id)
   return true
 }
+
 
 // Auto-init on window by default (keeps ergonomics)
 if (defaultTarget) init()
