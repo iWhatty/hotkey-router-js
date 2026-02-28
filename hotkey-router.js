@@ -28,7 +28,7 @@ const ahkPrefixMap = new Map([
 ])
 
 
-const keyAliases = {
+const keyAliases = Object.freeze({
   // common
   esc: 'escape',
   escape: 'escape',
@@ -77,7 +77,7 @@ const keyAliases = {
 
   // plus key ergonomics
   plus: '+',
-}
+})
 
 // --- config ---
 let ignoreEditable = true
@@ -102,15 +102,12 @@ function normalizeKey(key) {
 }
 
 function comboKeyFromParts({ ctrl, shift, alt, meta, key }) {
-  return [
-    ctrl ? 'ctrl' : '',
-    shift ? 'shift' : '',
-    alt ? 'alt' : '',
-    meta ? 'meta' : '',
-    key,
-  ]
-    .filter(Boolean)
-    .join('+')
+  let s = ''
+  if (ctrl) s += 'ctrl+'
+  if (shift) s += 'shift+'
+  if (alt) s += 'alt+'
+  if (meta) s += 'meta+'
+  return s ? s + key : key
 }
 
 function comboKeyFromEvent(e) {
@@ -124,13 +121,10 @@ function comboKeyFromEvent(e) {
 }
 
 
-
 function isModifierToken(token) {
-  const normalized = keyAliases[token] || token
-  return modifierTokens.has(normalized)
+  const t = normalizeKey(token)
+  return modifierTokens.has(t)
 }
-
-
 
 
 function parseHotkey(hotkeyStr) {
@@ -152,13 +146,15 @@ function parseHotkey(hotkeyStr) {
   const combo = { ctrl: false, shift: false, alt: false, meta: false, key: null }
 
   while (cleanStr.length) {
-    const mod = ahkPrefixMap.get(cleanStr[0])
+    const mod = ahkPrefixMap.get(cleanStr[0]) ?? null
     if (!mod) break
     combo[mod] = true
     cleanStr = cleanStr.slice(1).trimStart()
   }
 
-  // Allow: "ctrl++" OR "++" (after stripping AHK '+' shift prefix)
+  // Allow plus key:
+  //  - "ctrl++" => ctrl + "+"
+  //  - "++"     => shift + "+" (AHK '+' prefix sets shift, remaining '+' becomes the base key)
   // `split('+')` produces empties; we keep that signal.
   const rawParts = cleanStr.split('+').map((p) => p.trim())
   const parts = rawParts.filter(Boolean)
@@ -184,7 +180,7 @@ function parseHotkey(hotkeyStr) {
 
   // Continue parsing the remaining tokens (words/symbols/aliases)
   for (const part of parts) {
-    const actual = keyAliases[part] || part
+    const actual = keyAliases[part] ?? part
     if (actual === 'ctrl') combo.ctrl = true
     else if (actual === 'shift') combo.shift = true
     else if (actual === 'alt') combo.alt = true
@@ -199,8 +195,6 @@ function parseHotkey(hotkeyStr) {
 }
 
 
-
-
 function isFromInputTarget(e) {
   const t = e?.target
   if (!t) return false
@@ -213,8 +207,6 @@ function isFromInputTarget(e) {
     t.getAttribute?.('role') === 'textbox'
   )
 }
-
-
 
 
 // --- binding model ---
@@ -352,9 +344,11 @@ function unregisterPlugin(name) {
 function pause() {
   paused = true
 }
+
 function resume() {
   paused = false
 }
+
 function ignoreInput(value = true) {
   ignoreEditable = !!value
 }
@@ -471,7 +465,7 @@ function trigger(hotkeyStr, { type: forcedType } = {}) {
 }
 
 
-// Auto-init on window by default (keeps ergonomics)
+// Auto-init on window by default (browser only)
 if (defaultTarget) init()
 
 export default {
