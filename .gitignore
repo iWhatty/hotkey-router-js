@@ -28,3 +28,6 @@ coverage/
 
 # ESBuild cache (if used)
 .esbuild/
+
+
+*.tgz

@@ -1,17 +1,44 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8">
   <title>Hotkey Router Playground</title>
   <style>
-    body { font-family: sans-serif; padding: 2em; }
-    .hotkey { margin: 0.5em 0; }
-    .log { margin-top: 1em; background: #f3f3f3; padding: 1em; max-height: 150px; overflow-y: auto; font-family: monospace; }
-    .log-entry { margin-bottom: 0.25em; }
-    input[type="text"] { width: 200px; padding: 4px; }
-    select, button { padding: 4px; }
+    body {
+      font-family: sans-serif;
+      padding: 2em;
+    }
+
+    .hotkey {
+      margin: 0.5em 0;
+    }
+
+    .log {
+      margin-top: 1em;
+      background: #f3f3f3;
+      padding: 1em;
+      max-height: 150px;
+      overflow-y: auto;
+      font-family: monospace;
+    }
+
+    .log-entry {
+      margin-bottom: 0.25em;
+    }
+
+    input[type="text"] {
+      width: 200px;
+      padding: 4px;
+    }
+
+    select,
+    button {
+      padding: 4px;
+    }
   </style>
 </head>
+
 <body>
 
   <h1>Hotkey Playground</h1>
@@ -27,8 +54,23 @@
 
   <div class="hotkey">
     <label>Hotkey:</label>
-    <input type="text" id="hotkeyInput" placeholder="e.g. ctrl+shift+h or alt+x up" />
+    <input type="text" id="hotkeyInput" placeholder="e.g. ctrl+shift+h, ^k, ctrl++ or alt+x up" />
     <button id="bindBtn">Bind</button>
+  </div>
+
+  <!-- Advanced Options -->
+  <div class="hotkey" style="display:flex; gap:12px; flex-wrap:wrap; align-items:center;">
+    <label><input id="ignoreInputToggle" type="checkbox" checked /> ignoreInput</label>
+    <label><input id="preventDefaultToggle" type="checkbox" /> preventDefault</label>
+    <label><input id="stopPropagationToggle" type="checkbox" /> stopPropagation</label>
+    <label><input id="repeatToggle" type="checkbox" /> repeat</label>
+    <label><input id="onceToggle" type="checkbox" /> once</label>
+    <label>
+      priority
+      <input id="priorityInput" type="number" value="0" style="width:72px;" />
+    </label>
+    <button id="triggerBtn" type="button">Trigger</button>
+    <button id="clearLogBtn" type="button">Clear Log</button>
   </div>
 
   <div>
@@ -44,9 +86,10 @@
     <strong>Log Output:</strong>
     <div id="log"></div>
   </div>
-
   <script type="module">
-    import hotkeys from '../hotkey-router.js'
+    // Prefer dist if you build it; fall back to source during dev if you want.
+    import hotkeys from '../dist/hotkey-router.js'
+    // import hotkeys from '../hotkey-router.js'
 
     const actionSelect = document.getElementById('actionSelect')
     const hotkeyInput = document.getElementById('hotkeyInput')
@@ -55,13 +98,23 @@
     const logOutput = document.getElementById('log')
     const demoBox = document.getElementById('demoBox')
 
+    // Optional controls (add these elements to HTML if you want them)
+    const ignoreInputToggle = document.getElementById('ignoreInputToggle')
+    const preventDefaultToggle = document.getElementById('preventDefaultToggle')
+    const stopPropagationToggle = document.getElementById('stopPropagationToggle')
+    const repeatToggle = document.getElementById('repeatToggle')
+    const onceToggle = document.getElementById('onceToggle')
+    const priorityInput = document.getElementById('priorityInput')
+    const clearLogBtn = document.getElementById('clearLogBtn')
+    const triggerBtn = document.getElementById('triggerBtn')
+
     const actions = {
       logHello: () => log('Hello from hotkey!'),
       alertTime: () => alert(new Date().toLocaleTimeString()),
       toggleBox: () => {
         demoBox.style.display = demoBox.style.display === 'none' ? 'block' : 'none'
         log('Toggled the demo box')
-      }
+      },
     }
 
     const log = (msg) => {
@@ -71,10 +124,49 @@
       logOutput.prepend(entry)
     }
 
+    const getBindOptions = () => {
+      // If the optional UI isn’t present, default to empty options.
+      const priority = priorityInput ? Number(priorityInput.value || 0) : 0
+
+      const opts = {
+        preventDefault: !!preventDefaultToggle?.checked,
+        stopPropagation: !!stopPropagationToggle?.checked,
+        repeat: repeatToggle ? !!repeatToggle.checked : undefined,
+        once: !!onceToggle?.checked,
+        priority: Number.isFinite(priority) ? priority : 0,
+      }
+
+      // Keep options tiny: don’t pass repeat unless explicitly set in UI.
+      if (!repeatToggle) delete opts.repeat
+      return opts
+    }
+
+    // Track bindings so we can unbind them cleanly.
+    // Each row stores { key, actionKey, off }
     const bindings = []
 
-    bindBtn.addEventListener('click', () => {
-      const key = hotkeyInput.value.trim().toLowerCase()
+    const addBindingRow = ({ key, actionKey, off }) => {
+      const li = document.createElement('li')
+
+      const label = document.createElement('span')
+      label.textContent = `${key} → ${actionKey}`
+      label.style.marginRight = '0.75em'
+
+      const btn = document.createElement('button')
+      btn.textContent = 'Unbind'
+      btn.addEventListener('click', () => {
+        off?.()
+        li.remove()
+        log(`Unbound ${key}`)
+      })
+
+      li.appendChild(label)
+      li.appendChild(btn)
+      bindingsList.appendChild(li)
+    }
+
+    const bindFromUI = () => {
+      const key = hotkeyInput.value.trim()
       const actionKey = actionSelect.value
 
       if (!key || !actions[actionKey]) {
@@ -82,30 +174,62 @@
         return
       }
 
-      hotkeys.bind(key, actions[actionKey])
-      bindings.push({ key, action: actionKey })
+      try {
+        const opts = getBindOptions()
+        const off = hotkeys.bind(key, actions[actionKey], null, opts)
 
-      const li = document.createElement('li')
-      li.textContent = `${key} → ${actionKey}`
-      bindingsList.appendChild(li)
+        bindings.push({ key, actionKey, off })
+        addBindingRow({ key, actionKey, off })
 
-      log(`Bound ${key} to ${actionKey}`)
-      hotkeyInput.value = ''
+        log(`Bound ${key} to ${actionKey}`)
+        hotkeyInput.value = ''
+        hotkeyInput.focus()
+      } catch (err) {
+        log(`❌ ${err?.message || String(err)}`)
+        alert(err?.message || String(err))
+      }
+    }
+
+    bindBtn.addEventListener('click', bindFromUI)
+    hotkeyInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') bindFromUI()
     })
 
-    // Pre-binds
-    hotkeys.bind('ctrl+h', actions.logHello)
-    hotkeys.bind('ctrl+shift+t up', actions.toggleBox)
-    bindings.push({ key: 'ctrl+h', action: 'logHello' })
-    bindings.push({ key: 'ctrl+shift+t up', action: 'toggleBox' })
+    // Optional: live toggle ignoreInput
+    if (ignoreInputToggle) {
+      ignoreInputToggle.checked = true
+      ignoreInputToggle.addEventListener('change', () => {
+        hotkeys.ignoreInput(ignoreInputToggle.checked)
+        log(`ignoreInput(${ignoreInputToggle.checked})`)
+      })
+    } else {
+      hotkeys.ignoreInput(true)
+    }
 
-    const defaultLi = document.createElement('li')
-    defaultLi.textContent = `ctrl+h → logHello`
-    bindingsList.appendChild(defaultLi)
+    // Optional: trigger last typed hotkey
+    triggerBtn?.addEventListener('click', () => {
+      const key = hotkeyInput.value.trim()
+      if (!key) return
+      const ran = hotkeys.trigger(key)
+      log(ran ? `Triggered ${key}` : `No match for ${key}`)
+    })
 
-    const upLi = document.createElement('li')
-    upLi.textContent = `ctrl+shift+t up → toggleBox`
-    bindingsList.appendChild(upLi)
+    clearLogBtn?.addEventListener('click', () => {
+      logOutput.innerHTML = ''
+    })
+
+    // --- Pre-binds (updated to new spec + AHK examples) ---
+    const prebind = (key, actionKey, options = {}) => {
+      const off = hotkeys.bind(key, actions[actionKey], null, options)
+      bindings.push({ key, actionKey, off })
+      addBindingRow({ key, actionKey, off })
+    }
+
+    prebind('ctrl+h', 'logHello')
+    prebind('ctrl+shift+t up', 'toggleBox')
+    prebind('^k', 'logHello') // AHK ctrl+k
+    prebind('^!t up', 'toggleBox', { preventDefault: true }) // ctrl+alt+t (keyup)
   </script>
 </body>
+
 </html>

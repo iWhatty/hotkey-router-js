@@ -1,35 +1,42 @@
 {
   "name": "hotkey-router",
-  "version": "1.0.0",
+  "version": "0.0.1",
   "description": "A tiny, deterministic keyboard routing engine for modern web apps.",
+  "type": "module",
+  "author": "DR.WATT",
+  "license": "SEE LICENSE IN LICENSE",
   "keywords": [
     "hotkeys",
     "keyboard",
     "shortcuts",
     "router",
-    "frontend",
     "javascript"
   ],
-  "license": "MIT",
-  "author": "J W",
-  "type": "module",
-  "main": "./hotkey-router.js",
-  "module": "./hotkey-router.js",
+  "main": "./dist/hotkey-router.cjs",
+  "module": "./dist/hotkey-router.js",
   "exports": {
-    ".": "./hotkey-router.js"
+    ".": {
+      "import": "./dist/hotkey-router.js",
+      "require": "./dist/hotkey-router.cjs",
+      "default": "./dist/hotkey-router.js"
+
+    }
   },
   "sideEffects": false,
   "files": [
-    "hotkey-router.js",
+    "dist",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
+    "build": "node build.js",
+    "prepublishOnly": "npm run build",
     "test": "vitest run --environment jsdom",
     "test:watch": "vitest --environment jsdom"
   },
   "devDependencies": {
-    "jsdom": "^28.1.0",
+    "esbuild": "^0.21.0",
+    "jsdom": "^24.0.0",
     "vitest": "^3.1.2"
   },
   "engines": {
