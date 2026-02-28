@@ -1,16 +1,21 @@
 # hotkey-router
 
+[![npm version](https://img.shields.io/npm/v/hotkey-router.svg)](https://www.npmjs.com/package/hotkey-router)
+[![bundle size](https://img.shields.io/bundlephobia/minzip/hotkey-router)](https://bundlephobia.com/package/hotkey-router)
+[![GitHub stars](https://img.shields.io/github/stars/iWhatty/hotkey-router-js?style=social)](https://github.com/iWhatty/hotkey-router-js)
+
 **A tiny, deterministic keyboard routing engine for modern web apps.**
 
 Hotkey Router is not a key utility.
 It is a predictable, plugin-first routing layer for keyboard shortcuts.
 
-* ⚡ O(1) dispatch (no scanning all bindings)
+* ⚡ O(1) dispatch
 * 🧩 Plugin-safe lifecycle management
 * 🎯 Deterministic winner selection (priority + recency)
 * 🛑 Input-safe by default
 * 🧪 Testable via `trigger()`
 * 📦 Zero dependencies
+* 4.9 kB Minified, 2.2 kB Minified + Gzipped
 
 ---
 
@@ -32,10 +37,22 @@ No keycodes. No legacy IE hacks. No hidden global scope state.
 npm install hotkey-router
 ```
 
-Or via CDN:
+### ESM
 
 ```js
-import hotkeys from 'https://cdn.skypack.dev/hotkey-router'
+import hotkeys from 'hotkey-router'
+```
+
+### CommonJS
+
+```js
+const hotkeys = require('hotkey-router')
+```
+
+### CDN (ESM)
+
+```js
+import hotkeys from 'https://cdn.jsdelivr.net/npm/hotkey-router/dist/hotkey-router.min.js'
 ```
 
 ---
@@ -216,7 +233,7 @@ hotkeys.init({
 })
 ```
 
-Auto-initializes on `window` by default.
+Auto-initializes on `window` by default (browser environments).
 
 ---
 
@@ -241,7 +258,7 @@ Returns `true` if a handler ran.
 
 # Supported Syntax
 
-### Standard
+## Standard
 
 * `ctrl+k`
 * `shift+a`
@@ -249,7 +266,7 @@ Returns `true` if a handler ran.
 * `mod+s` (meta on macOS, ctrl elsewhere)
 * `ctrl++` or `ctrl+plus`
 
-### AHK-Style Prefix Modifiers
+## AHK-Style Prefix Modifiers
 
 * `^k` → `ctrl+k`
 * `!k` → `alt+k`
@@ -259,9 +276,9 @@ Returns `true` if a handler ran.
 
 Modifiers must appear before the base key.
 
-### Aliases Supported
+## Aliases Supported
 
-Modifiers:
+### Modifiers
 
 * `ctrl`, `control`, `⌃`
 * `shift`, `⇧`, `+`
@@ -269,7 +286,7 @@ Modifiers:
 * `meta`, `cmd`, `command`, `win`, `⌘`, `#`
 * `mod` (meta on macOS, ctrl elsewhere)
 
-Navigation / Special:
+### Navigation / Special Keys
 
 * `escape`, `esc`
 * `enter`, `return`
@@ -312,4 +329,4 @@ Chrome, Firefox, Safari, Edge.
 
 # License
 
-MIT © J W
+See LICENSE file for details.
