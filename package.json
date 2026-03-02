@@ -1,6 +1,6 @@
 {
   "name": "hotkey-router",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "A tiny, deterministic keyboard routing engine for modern web apps.",
   "type": "module",
   "author": "DR.WATT",
@@ -12,44 +12,37 @@
     "router",
     "javascript"
   ],
-
   "main": "./dist/hotkey-router.cjs",
   "module": "./dist/hotkey-router.js",
-
   "exports": {
     ".": {
       "import": "./dist/hotkey-router.js",
       "require": "./dist/hotkey-router.cjs"
     }
   },
-
   "sideEffects": false,
-
   "files": [
     "dist",
     "README.md",
     "LICENSE"
   ],
-
   "scripts": {
     "build": "node build.js",
     "prepublishOnly": "npm run build",
     "test": "vitest run --environment jsdom",
     "test:watch": "vitest --environment jsdom"
   },
-
   "devDependencies": {
     "esbuild": "^0.21.0",
     "jsdom": "^24.0.0",
     "vitest": "^3.1.2"
   },
-
   "engines": {
     "node": ">=18"
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/iWhatty/hotkey-router-js.git"
+    "url": "git+https://github.com/iWhatty/hotkey-router-js.git"
   },
   "bugs": {
     "url": "https://github.com/iWhatty/hotkey-router-js/issues"

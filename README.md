@@ -14,8 +14,9 @@ It is a predictable, plugin-first routing layer for keyboard shortcuts.
 * 🎯 Deterministic winner selection (priority + recency)
 * 🛑 Input-safe by default
 * 🧪 Testable via `trigger()`
-* 📦 Zero dependencies
-* 4.9 kB Minified, 2.2 kB Minified + Gzipped
+* 📦 4.9 kB minified
+* 🗜  2.2 kB minified + gzipped
+* 🚫 Zero dependencies
 
 ---
 
