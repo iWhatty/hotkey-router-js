@@ -180,36 +180,46 @@ function parseHotkey(hotkeyStr) {
   const isUp = /\s+up$/i.test(raw)
   const baseRaw = isUp ? raw.replace(/\s+up$/i, '').trim() : raw
 
-  // Pull out a code:XXX token before lowercasing; preserve the camelCase value.
-  // Multiple code tokens in one binding are not supported (last one wins).
-  let codeValue = null
-  const scrubbed = baseRaw.replace(CODE_TOKEN_RE, (_, sep, val) => {
-    codeValue = val
-    return sep + '__code__'
-  })
-
-  let cleanStr = scrubbed.toLowerCase()
-
   // --- AHK-style prefix modifiers ---
   // Examples:
-  //  ^k   => ctrl+k
-  //  !k   => alt+k
-  //  +k   => shift+k
-  //  #k   => meta+k
-  //  ^!k  => ctrl+alt+k
+  //  ^k    => ctrl+k
+  //  !k    => alt+k
+  //  +k    => shift+k
+  //  #k    => meta+k
+  //  ^!k   => ctrl+alt+k
+  //  !code:KeyX => alt+code:KeyX
   //
-  // This runs BEFORE normal "+" token parsing so it composes cleanly.
+  // We strip these BEFORE both the code-token extraction AND the lowercase
+  // pass, because the AHK prefix chars (^ ! + #) are case-stable, and the
+  // remainder may contain a case-sensitive `code:KeyX` token that must survive.
   const combo = {
     ctrl: false, shift: false, alt: false, meta: false,
     key: null, code: null, bareModifier: null,
   }
 
-  while (cleanStr.length) {
-    const mod = ahkPrefixMap.get(cleanStr[0]) ?? null
+  let stripped = baseRaw
+  while (stripped.length) {
+    const mod = ahkPrefixMap.get(stripped[0]) ?? null
     if (!mod) break
     combo[mod] = true
-    cleanStr = cleanStr.slice(1).trimStart()
+    stripped = stripped.slice(1).trimStart()
   }
+
+  // Pull out a code:XXX token before lowercasing; preserve the camelCase value.
+  // Reject multiple code: tokens to avoid silent loss of intent.
+  const codeMatches = stripped.match(/code:[A-Za-z][A-Za-z0-9_]*/g)
+  if (codeMatches && codeMatches.length > 1) {
+    throw new Error(
+      `Invalid hotkey "${hotkeyStr}": multiple code: tokens not supported (got ${codeMatches.length}).`
+    )
+  }
+  let codeValue = null
+  const scrubbed = stripped.replace(CODE_TOKEN_RE, (_, sep, val) => {
+    codeValue = val
+    return sep + '__code__'
+  })
+
+  let cleanStr = scrubbed.toLowerCase()
 
   // Allow plus key:
   //  - "ctrl++" => ctrl + "+"
@@ -551,14 +561,26 @@ function trigger(hotkeyStr, { type: forcedType } = {}) {
     ? BARE_MOD_TO_KEY[combo.bareModifier]
     : combo.key
 
+  // For bare-modifier keyup, real KeyboardEvents have the corresponding
+  // modifier flag FALSE (the modifier just released). Mirror that so
+  // automation handlers that inspect e.altKey / e.ctrlKey / etc. see the
+  // same value they'd see from a real event.
+  let altKey = !!combo.alt
+  let ctrlKey = !!combo.ctrl
+  let shiftKey = !!combo.shift
+  let metaKey = !!combo.meta
+  if (combo.bareModifier && actualType === 'keyup') {
+    if (combo.bareModifier === 'alt') altKey = false
+    else if (combo.bareModifier === 'ctrl') ctrlKey = false
+    else if (combo.bareModifier === 'shift') shiftKey = false
+    else if (combo.bareModifier === 'meta') metaKey = false
+  }
+
   const e = {
     type: actualType,
     key: eventKey,
     code: combo.code || null,
-    ctrlKey: !!combo.ctrl,
-    shiftKey: !!combo.shift,
-    altKey: !!combo.alt,
-    metaKey: !!combo.meta,
+    ctrlKey, shiftKey, altKey, metaKey,
     repeat: false,
     preventDefault() { },
     stopPropagation() { },

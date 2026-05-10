@@ -401,5 +401,53 @@ describe('hotkey-router', () => {
       dispatch('keydown', '≈', { altKey: true, code: 'KeyX' })
       expect(log).not.toHaveBeenCalled()
     })
+
+    it('combines AHK-style prefix with code: token', () => {
+      // "!code:KeyX" should mean alt+code:KeyX
+      hotkeys.bind('!code:KeyX', log)
+      dispatch('keydown', '≈', { altKey: true, code: 'KeyX' })
+      expect(log).toHaveBeenCalledOnce()
+    })
+
+    it('combines multiple AHK-style prefixes with code: token', () => {
+      // "^!code:KeyX" should mean ctrl+alt+code:KeyX
+      hotkeys.bind('^!code:KeyX', log)
+      dispatch('keydown', '≈', { ctrlKey: true, altKey: true, code: 'KeyX' })
+      expect(log).toHaveBeenCalledOnce()
+    })
+
+    it('rejects multiple code: tokens with a clear error', () => {
+      expect(() =>
+        hotkeys.bind('alt+code:KeyA+code:KeyB', log)
+      ).toThrow(/multiple code: tokens/i)
+    })
+  })
+
+  // =========================================================================
+  // trigger() fidelity for the new binding shapes
+  // =========================================================================
+  describe('trigger() fidelity', () => {
+    it('synthetic keyup event for bare-modifier has modifier flag false', () => {
+      const seen = vi.fn()
+      hotkeys.bind('alt up', (e) => seen(e.altKey))
+      hotkeys.trigger('alt up')
+      // Real Alt keyup has e.altKey === false (Alt has just been released).
+      // The synthetic event must mirror that.
+      expect(seen).toHaveBeenCalledWith(false)
+    })
+
+    it('synthetic keydown event for bare-modifier has modifier flag true', () => {
+      const seen = vi.fn()
+      hotkeys.bind('alt', (e) => seen(e.altKey))
+      hotkeys.trigger('alt')
+      expect(seen).toHaveBeenCalledWith(true)
+    })
+
+    it('synthetic event for code-based binding sets e.code', () => {
+      const seen = vi.fn()
+      hotkeys.bind('alt+code:KeyX', (e) => seen(e.code))
+      hotkeys.trigger('alt+code:KeyX')
+      expect(seen).toHaveBeenCalledWith('KeyX')
+    })
   })
 })

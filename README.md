@@ -115,9 +115,10 @@ Notes:
 ```js
 hotkeys.bind('alt+code:KeyX', deleteHovered)   // matches the physical X key
 hotkeys.bind('ctrl+code:Digit1', goToTab1)     // matches digit row, not numpad
+hotkeys.bind('!code:KeyX', deleteHovered)      // AHK shorthand also works
 ```
 
-The `code:` value is **case-sensitive** (matches the camelCase `KeyboardEvent.code` spec values: `KeyA`, `Digit1`, `ArrowLeft`, etc.).
+The `code:` value is **case-sensitive** (matches the camelCase `KeyboardEvent.code` spec values: `KeyA`, `Digit1`, `ArrowLeft`, etc.). Only one `code:` token per binding is allowed; multiple `code:` tokens throw a parse error.
 
 Both key-based and code-based bindings can coexist; the standard priority + recency rules pick the winner.
 
