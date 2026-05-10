@@ -20,6 +20,18 @@ const isMac =
 
 const modifierTokens = new Set(['ctrl', 'shift', 'alt', 'meta'])
 
+// Map from KeyboardEvent.key (which IS the modifier name on bare-modifier events)
+// to the canonical token used in combo strings. Used to detect bare-modifier
+// keydown/keyup events at dispatch time.
+const MODIFIER_KEY_TOKEN = Object.freeze({
+  Alt: 'alt',
+  AltGraph: 'alt',
+  Control: 'ctrl',
+  Shift: 'shift',
+  Meta: 'meta',
+  OS: 'meta',
+})
+
 const ahkPrefixMap = new Map([
   ['^', 'ctrl'],  // Ctrl
   ['!', 'alt'],   // Alt
@@ -101,16 +113,30 @@ function normalizeKey(key) {
   return keyAliases[k] ?? (raw === ' ' ? ' ' : k)
 }
 
-function comboKeyFromParts({ ctrl, shift, alt, meta, key }) {
+function comboKeyFromParts({ ctrl, shift, alt, meta, key, code, bareModifier }) {
+  // Bare-modifier bindings get a sentinel namespace so they can't collide with
+  // regular chord combo strings (`'alt+x'` vs `'__bare__:alt'`).
+  if (bareModifier) return `__bare__:${bareModifier}`
+
   let s = ''
   if (ctrl) s += 'ctrl+'
   if (shift) s += 'shift+'
   if (alt) s += 'alt+'
   if (meta) s += 'meta+'
+
+  // Code-based combos use a `code:KeyX` suffix instead of the key character.
+  if (code) return s + 'code:' + code
   return s ? s + key : key
 }
 
 function comboKeyFromEvent(e) {
+  // If the event's `key` is itself a modifier name, this is a bare-modifier
+  // press/release. Match it via the bare-modifier sentinel regardless of which
+  // other modifier flags are set (loose match — Alt fires `alt` even when held
+  // alongside Ctrl).
+  const bareMod = MODIFIER_KEY_TOKEN[e.key]
+  if (bareMod) return `__bare__:${bareMod}`
+
   return comboKeyFromParts({
     ctrl: e.ctrlKey,
     shift: e.shiftKey,
@@ -120,6 +146,21 @@ function comboKeyFromEvent(e) {
   })
 }
 
+// Code-based lookup string for an event. Independent of `comboKeyFromEvent`
+// because consumers can register either key-based OR code-based bindings (or
+// both) for the same physical key combo, and we look up under whichever they
+// chose.
+function codeKeyFromEvent(e) {
+  if (!e.code) return null
+
+  let s = ''
+  if (e.ctrlKey) s += 'ctrl+'
+  if (e.shiftKey) s += 'shift+'
+  if (e.altKey) s += 'alt+'
+  if (e.metaKey) s += 'meta+'
+  return s + 'code:' + e.code
+}
+
 
 function isModifierToken(token) {
   const t = normalizeKey(token)
@@ -127,12 +168,27 @@ function isModifierToken(token) {
 }
 
 
+// Matches `code:KeyX` (case-sensitive value). Used to extract code tokens BEFORE
+// the rest of the parser lowercases everything, since KeyboardEvent.code values
+// are camelCase (KeyA, Digit1, ArrowLeft) and must be preserved.
+const CODE_TOKEN_RE = /(^|\+)code:([A-Za-z][A-Za-z0-9_]*)/
+
 function parseHotkey(hotkeyStr) {
   const raw = String(hotkeyStr || '').trim()
-  const lower = raw.toLowerCase()
 
-  const isUp = lower.endsWith(' up')
-  let cleanStr = (isUp ? raw.slice(0, -3) : raw).trim().toLowerCase()
+  // Detect ' up' suffix case-insensitively so 'Alt UP' works the same as 'alt up'.
+  const isUp = /\s+up$/i.test(raw)
+  const baseRaw = isUp ? raw.replace(/\s+up$/i, '').trim() : raw
+
+  // Pull out a code:XXX token before lowercasing; preserve the camelCase value.
+  // Multiple code tokens in one binding are not supported (last one wins).
+  let codeValue = null
+  const scrubbed = baseRaw.replace(CODE_TOKEN_RE, (_, sep, val) => {
+    codeValue = val
+    return sep + '__code__'
+  })
+
+  let cleanStr = scrubbed.toLowerCase()
 
   // --- AHK-style prefix modifiers ---
   // Examples:
@@ -143,7 +199,10 @@ function parseHotkey(hotkeyStr) {
   //  ^!k  => ctrl+alt+k
   //
   // This runs BEFORE normal "+" token parsing so it composes cleanly.
-  const combo = { ctrl: false, shift: false, alt: false, meta: false, key: null }
+  const combo = {
+    ctrl: false, shift: false, alt: false, meta: false,
+    key: null, code: null, bareModifier: null,
+  }
 
   while (cleanStr.length) {
     const mod = ahkPrefixMap.get(cleanStr[0]) ?? null
@@ -180,6 +239,10 @@ function parseHotkey(hotkeyStr) {
 
   // Continue parsing the remaining tokens (words/symbols/aliases)
   for (const part of parts) {
+    if (part === '__code__') {
+      combo.code = codeValue
+      continue
+    }
     const actual = keyAliases[part] ?? part
     if (actual === 'ctrl') combo.ctrl = true
     else if (actual === 'shift') combo.shift = true
@@ -188,8 +251,29 @@ function parseHotkey(hotkeyStr) {
     else combo.key = normalizeKey(actual)
   }
 
-  if (!combo.key && impliedPlusKey) combo.key = '+'
-  if (!combo.key) throw new Error(`Invalid hotkey "${hotkeyStr}" (missing base key)`)
+  if (!combo.key && !combo.code && impliedPlusKey) combo.key = '+'
+
+  // If no base key/code is set, this might be a bare-modifier binding ('alt' / 'ctrl').
+  // Allow exactly ONE modifier with no other tokens. Multi-modifier bare bindings
+  // (e.g. 'ctrl+alt') are intentionally rejected — add a base key for those.
+  if (!combo.key && !combo.code) {
+    const modCount =
+      (combo.ctrl ? 1 : 0) + (combo.shift ? 1 : 0) +
+      (combo.alt ? 1 : 0) + (combo.meta ? 1 : 0)
+
+    if (modCount === 1) {
+      combo.bareModifier =
+        combo.ctrl ? 'ctrl' :
+        combo.shift ? 'shift' :
+        combo.alt ? 'alt' : 'meta'
+    } else if (modCount > 1) {
+      throw new Error(
+        `Invalid hotkey "${hotkeyStr}": multi-modifier bare bindings not supported. Add a base key (e.g. "ctrl+alt+x").`
+      )
+    } else {
+      throw new Error(`Invalid hotkey "${hotkeyStr}" (missing base key)`)
+    }
+  }
 
   return { combo, type: isUp ? 'keyup' : 'keydown', raw: hotkeyStr }
 }
@@ -379,17 +463,27 @@ function handleEvent(type) {
 
     const fromInput = ignoreEditable && isFromInputTarget(e)
     const comboStr = comboKeyFromEvent(e)
+    const codeStr = codeKeyFromEvent(e)
 
-    const bindings = registry.get(comboStr)?.get(type)
-    if (!bindings?.length) return
-
+    // Look up under both lookup keys: key-based (`alt+x`) and code-based
+    // (`alt+code:KeyX`). Same physical keypress, two valid binding shapes.
+    // Merge candidates and let the existing priority/recency arbiter pick.
+    const seen = new Set()
     const candidates = []
-    for (const b of bindings) {
-      const o = b.options
-      if (fromInput && !o.allowIn?.(e)) continue
-      if (type === 'keydown' && o.repeat === false && e.repeat) continue
-      if (o.when && o.when(e) === false) continue
-      candidates.push(b)
+    for (const lookupKey of [comboStr, codeStr]) {
+      if (!lookupKey || seen.has(lookupKey)) continue
+      seen.add(lookupKey)
+
+      const bindings = registry.get(lookupKey)?.get(type)
+      if (!bindings?.length) continue
+
+      for (const b of bindings) {
+        const o = b.options
+        if (fromInput && !o.allowIn?.(e)) continue
+        if (type === 'keydown' && o.repeat === false && e.repeat) continue
+        if (o.when && o.when(e) === false) continue
+        candidates.push(b)
+      }
     }
     if (!candidates.length) return
 
@@ -432,6 +526,17 @@ function destroy() {
 
 
 // --- programmatic trigger (tests / automation) ---
+//
+// Reverse map: 'alt' -> 'Alt' (the KeyboardEvent.key value for that bare modifier).
+// Used to populate the synthetic event's `.key` field so consumer handlers that
+// inspect `e.key` see the same value they'd get from a real event.
+const BARE_MOD_TO_KEY = {
+  ctrl: 'Control',
+  shift: 'Shift',
+  alt: 'Alt',
+  meta: 'Meta',
+}
+
 function trigger(hotkeyStr, { type: forcedType } = {}) {
   const { combo, type } = parseHotkey(hotkeyStr)
   const comboStr = comboKeyFromParts(combo)
@@ -440,9 +545,16 @@ function trigger(hotkeyStr, { type: forcedType } = {}) {
   const bindings = registry.get(comboStr)?.get(actualType)
   if (!bindings?.length) return false
 
+  // Fill `.key` from bareModifier when the binding is bare-modifier-only;
+  // otherwise use combo.key. `.code` is set from combo.code for code-based bindings.
+  const eventKey = combo.bareModifier
+    ? BARE_MOD_TO_KEY[combo.bareModifier]
+    : combo.key
+
   const e = {
     type: actualType,
-    key: combo.key,
+    key: eventKey,
+    code: combo.code || null,
     ctrlKey: !!combo.ctrl,
     shiftKey: !!combo.shift,
     altKey: !!combo.alt,

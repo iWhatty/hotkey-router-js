@@ -224,4 +224,182 @@ describe('hotkey-router', () => {
     const ran = hotkeys.trigger('ctrl+q')
     expect(ran).toBe(false)
   })
+
+  // =========================================================================
+  // Bare-modifier bindings — hold-Alt-as-mode UX patterns
+  // =========================================================================
+  describe('bare-modifier bindings', () => {
+    it('binds bare alt keydown', () => {
+      hotkeys.bind('alt', log)
+      dispatch('keydown', 'Alt', { altKey: true })
+      expect(log).toHaveBeenCalledOnce()
+    })
+
+    it('binds bare alt keyup with " up" suffix', () => {
+      hotkeys.bind('alt up', log)
+      // On Alt keyup, altKey is false (Alt has just been released).
+      dispatch('keyup', 'Alt', { altKey: false })
+      expect(log).toHaveBeenCalledOnce()
+    })
+
+    it('keydown and keyup are separate bindings', () => {
+      const downLog = vi.fn()
+      const upLog = vi.fn()
+      hotkeys.bind('alt', downLog)
+      hotkeys.bind('alt up', upLog)
+
+      dispatch('keydown', 'Alt', { altKey: true })
+      expect(downLog).toHaveBeenCalledOnce()
+      expect(upLog).not.toHaveBeenCalled()
+
+      dispatch('keyup', 'Alt', { altKey: false })
+      expect(downLog).toHaveBeenCalledOnce()
+      expect(upLog).toHaveBeenCalledOnce()
+    })
+
+    it('does not collide with chord bindings on the same modifier', () => {
+      const bareLog = vi.fn()
+      const chordLog = vi.fn()
+      hotkeys.bind('alt', bareLog)
+      hotkeys.bind('alt+x', chordLog)
+
+      // Bare-Alt press (no other key)
+      dispatch('keydown', 'Alt', { altKey: true })
+      expect(bareLog).toHaveBeenCalledOnce()
+      expect(chordLog).not.toHaveBeenCalled()
+
+      // Now press X with Alt held
+      dispatch('keydown', 'x', { altKey: true })
+      expect(chordLog).toHaveBeenCalledOnce()
+      expect(bareLog).toHaveBeenCalledOnce() // still 1, not re-fired
+    })
+
+    it('respects the default repeat: false (held Alt fires only once)', () => {
+      hotkeys.bind('alt', log)
+
+      dispatch('keydown', 'Alt', { altKey: true, repeat: false })
+      dispatch('keydown', 'Alt', { altKey: true, repeat: true })
+      dispatch('keydown', 'Alt', { altKey: true, repeat: true })
+      expect(log).toHaveBeenCalledOnce()
+    })
+
+    it('supports bare ctrl, shift, meta as well', () => {
+      const ctrlLog = vi.fn()
+      const shiftLog = vi.fn()
+      const metaLog = vi.fn()
+      hotkeys.bind('ctrl', ctrlLog)
+      hotkeys.bind('shift', shiftLog)
+      hotkeys.bind('meta', metaLog)
+
+      dispatch('keydown', 'Control', { ctrlKey: true })
+      dispatch('keydown', 'Shift', { shiftKey: true })
+      dispatch('keydown', 'Meta', { metaKey: true })
+
+      expect(ctrlLog).toHaveBeenCalledOnce()
+      expect(shiftLog).toHaveBeenCalledOnce()
+      expect(metaLog).toHaveBeenCalledOnce()
+    })
+
+    it('rejects multi-modifier bare bindings with a clear error', () => {
+      expect(() => hotkeys.bind('ctrl+alt', log)).toThrow(/multi-modifier bare/i)
+    })
+
+    it('unbind removes a bare-modifier binding', () => {
+      hotkeys.bind('alt', log)
+      hotkeys.unbind('alt')
+
+      dispatch('keydown', 'Alt', { altKey: true })
+      expect(log).not.toHaveBeenCalled()
+    })
+
+    it('trigger() works on bare-modifier bindings', () => {
+      hotkeys.bind('alt', log)
+      const ran = hotkeys.trigger('alt')
+      expect(ran).toBe(true)
+      expect(log).toHaveBeenCalledOnce()
+    })
+  })
+
+  // =========================================================================
+  // code:-based matching — cross-platform Alt+letter (macOS Option remap)
+  // =========================================================================
+  describe('code:-based matching', () => {
+    it('matches alt+code:KeyX even when e.key has been remapped (macOS Option+X)', () => {
+      hotkeys.bind('alt+code:KeyX', log)
+
+      // Simulate macOS Option+X: e.key === '≈', e.code === 'KeyX'
+      dispatch('keydown', '≈', { altKey: true, code: 'KeyX' })
+      expect(log).toHaveBeenCalledOnce()
+    })
+
+    it('matches when both code and key would resolve (regular Linux/Windows alt+x)', () => {
+      hotkeys.bind('alt+code:KeyX', log)
+
+      // On Win/Linux, Alt+X gives e.key === 'x' AND e.code === 'KeyX'
+      dispatch('keydown', 'x', { altKey: true, code: 'KeyX' })
+      expect(log).toHaveBeenCalledOnce()
+    })
+
+    it('does not fire on a different physical key with the same modifiers', () => {
+      hotkeys.bind('alt+code:KeyX', log)
+
+      dispatch('keydown', 'z', { altKey: true, code: 'KeyZ' })
+      expect(log).not.toHaveBeenCalled()
+    })
+
+    it('does not fire without the required modifier', () => {
+      hotkeys.bind('alt+code:KeyX', log)
+
+      dispatch('keydown', 'x', { altKey: false, code: 'KeyX' })
+      expect(log).not.toHaveBeenCalled()
+    })
+
+    it('preserves camelCase in code values (KeyX vs keyx)', () => {
+      hotkeys.bind('alt+code:KeyX', log)
+
+      // The bundle should compare case-sensitively. e.code is always camelCase.
+      dispatch('keydown', '≈', { altKey: true, code: 'KeyX' })
+      dispatch('keydown', '≈', { altKey: true, code: 'keyx' }) // wrong case
+      expect(log).toHaveBeenCalledOnce()
+    })
+
+    it('keyup form works: code:KeyX up', () => {
+      hotkeys.bind('alt+code:KeyX up', log)
+
+      dispatch('keyup', '≈', { altKey: true, code: 'KeyX' })
+      expect(log).toHaveBeenCalledOnce()
+    })
+
+    it('key-based and code-based bindings can coexist; code-based wins by recency', () => {
+      const keyBased = vi.fn()
+      const codeBased = vi.fn()
+      hotkeys.bind('alt+x', keyBased)
+      hotkeys.bind('alt+code:KeyX', codeBased) // bound second
+
+      // On Linux/Win where both would technically match (e.key='x' AND e.code='KeyX'),
+      // the more-recently-bound one wins (priority tie -> recency).
+      dispatch('keydown', 'x', { altKey: true, code: 'KeyX' })
+      expect(codeBased).toHaveBeenCalledOnce()
+      expect(keyBased).not.toHaveBeenCalled()
+    })
+
+    it('priority overrides recency between key-based and code-based bindings', () => {
+      const keyBased = vi.fn()
+      const codeBased = vi.fn()
+      hotkeys.bind('alt+x', keyBased, null, { priority: 100 })
+      hotkeys.bind('alt+code:KeyX', codeBased)
+
+      dispatch('keydown', 'x', { altKey: true, code: 'KeyX' })
+      expect(keyBased).toHaveBeenCalledOnce()
+      expect(codeBased).not.toHaveBeenCalled()
+    })
+
+    it('unbind removes a code-based binding', () => {
+      hotkeys.bind('alt+code:KeyX', log)
+      hotkeys.unbind('alt+code:KeyX')
+
+      dispatch('keydown', '≈', { altKey: true, code: 'KeyX' })
+      expect(log).not.toHaveBeenCalled()
+    })
+  })
 })

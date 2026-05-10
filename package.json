@@ -1,6 +1,6 @@
 {
   "name": "hotkey-router",
-  "version": "0.0.3",
+  "version": "0.1.0",
   "description": "A tiny, deterministic keyboard routing engine for modern web apps.",
   "type": "module",
   "author": "DR.WATT",
@@ -28,7 +28,8 @@
   ],
   "scripts": {
     "build": "node build.js",
-    "prepublishOnly": "npm run build",
+    "prepare": "node build.js",
+    "prepublishOnly": "node build.js",
     "test": "vitest run --environment jsdom",
     "test:watch": "vitest --environment jsdom"
   },

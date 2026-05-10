@@ -78,12 +78,48 @@ hotkeys.bind('^k', () => {
   openCommandPalette() // ctrl+k
 })
 
+// Bare-modifier bindings (Alt-as-mode UX)
+hotkeys.bind('alt', enterSelectMode)        // fires on Alt keydown
+hotkeys.bind('alt up', exitSelectMode)      // fires on Alt keyup
+
+// Layout-stable matching via KeyboardEvent.code (cross-platform Alt+letter
+// — works on macOS where Option remaps Alt+X -> ≈)
+hotkeys.bind('alt+code:KeyX', deleteHovered, null, { preventDefault: true })
+
 // Plugin grouping
 hotkeys.registerPlugin('docs', {
   'ctrl+f': openSearch,
   'escape': closeSearch,
 })
 ```
+
+## Bare-modifier bindings (v0.1.0+)
+
+Some UX patterns are driven by a bare modifier rather than a chord — e.g. "hold Alt to enter select mode, release Alt to exit."
+
+```js
+hotkeys.bind('alt', onAltDown)       // fires on Alt keydown
+hotkeys.bind('alt up', onAltUp)      // fires on Alt keyup
+hotkeys.bind('ctrl', onCtrlDown)     // any single modifier supported
+```
+
+Notes:
+- Only **single** bare modifiers are supported. Multi-modifier bare bindings (`'ctrl+alt'`) throw — add a base key for those.
+- Default `repeat: false` applies, so a held modifier fires only once on keydown.
+- Loose match: a bare-Alt binding fires whenever the Alt key is the one being pressed/released, regardless of which other modifier flags are also set. Add a `when` filter for exact-set semantics.
+
+## Code-based matching (v0.1.0+)
+
+`KeyboardEvent.key` is layout- and modifier-dependent — Alt+X gives `≈` on macOS, `x` on Linux/Windows. For shortcuts that should be stable across platforms, bind to `KeyboardEvent.code` instead:
+
+```js
+hotkeys.bind('alt+code:KeyX', deleteHovered)   // matches the physical X key
+hotkeys.bind('ctrl+code:Digit1', goToTab1)     // matches digit row, not numpad
+```
+
+The `code:` value is **case-sensitive** (matches the camelCase `KeyboardEvent.code` spec values: `KeyA`, `Digit1`, `ArrowLeft`, etc.).
+
+Both key-based and code-based bindings can coexist; the standard priority + recency rules pick the winner.
 
 ---
 
