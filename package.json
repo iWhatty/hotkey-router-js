@@ -33,7 +33,8 @@
     "data",
     "README.md",
     "LICENSE",
-    "ADDITIONAL_TERMS.md"
+    "ADDITIONAL_TERMS.md",
+    "robots.txt"
   ],
   "scripts": {
     "build": "node build.js",
