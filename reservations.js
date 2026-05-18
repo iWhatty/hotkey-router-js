@@ -205,6 +205,41 @@ export function emitReservationWarning(reservation, rawHotkey, console_ = consol
   fn.call(console_, msg)
 }
 
+// --- installer ----------------------------------------------------------------
+//
+// Wire reservation warnings into a hotkey-router instance. Importing this
+// function is the opt-in: bundlers that don't see this import tree-shake the
+// entire ~5 KB data table out of the build.
+//
+//   import hotkeys from 'hotkey-router'
+//   import { installReservationWarnings } from 'hotkey-router/reservations'
+//   installReservationWarnings(hotkeys)
+//
+// Returns an `uninstall()` function. Per-bind opt-out still works:
+//   hotkeys.bind('meta+shift+f', fn, null, { warnOnReserved: false })
+//
+// Options:
+//   platform — override auto-detected 'mac' | 'windows' | 'linux'
+//   browser  — override auto-detected 'firefox' | 'chrome' | 'safari' | 'edge'
+//   console  — inject a custom console-like object (used by tests)
+export function installReservationWarnings(hotkeys, opts = {}) {
+  if (!hotkeys || typeof hotkeys.onBind !== 'function') {
+    throw new TypeError(
+      'installReservationWarnings(hotkeys) requires a hotkey-router instance with onBind() (>= v0.2.0)'
+    )
+  }
+  const platform = opts.platform !== undefined ? opts.platform : detectPlatform()
+  const browser = opts.browser !== undefined ? opts.browser : detectBrowser()
+  const console_ = opts.console || console
+
+  return hotkeys.onBind(({ combo, raw, options }) => {
+    if (options?.warnOnReserved === false) return
+    if (!platform || !browser) return
+    const reservation = lookupReservation(combo, { platform, browser })
+    if (reservation) emitReservationWarning(reservation, raw, console_)
+  })
+}
+
 export const SCHEMA_VERSION = HOTKEY_DATA?.version?.schema
 export const DATA_GENERATED = HOTKEY_DATA?.version?.generated
 export { HOTKEY_DATA }

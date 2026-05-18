@@ -14,8 +14,8 @@ It is a predictable, plugin-first routing layer for keyboard shortcuts.
 * 🎯 Deterministic winner selection (priority + recency)
 * 🛑 Input-safe by default
 * 🧪 Testable via `trigger()`
-* 🚨 Built-in browser/OS conflict warnings at bind time
-* 📦 ~7 kB minified + gzipped (incl. bundled reservation data)
+* 🚨 Optional opt-in browser/OS conflict warnings (tree-shakable)
+* 📦 ~3 kB minified + gzipped (core); ~7.5 kB with conflict warnings
 * 🚫 Zero dependencies
 
 ---
@@ -95,16 +95,36 @@ hotkeys.registerPlugin('docs', {
 
 ## Conflict warnings (v0.2.0+)
 
-Some combos are reserved by the browser chrome (find bar, devtools, bookmarks) or the OS (Spotlight, window management) — they never reach page-world JavaScript, no matter how early you listen or whether you call `preventDefault`. Hotkey Router bundles a per-platform/per-browser reservation table and emits a soft warning at **bind time** when you register one of these combos, so the silent failure becomes a noisy one.
+Some combos are reserved by the browser chrome (find bar, devtools, bookmarks) or the OS (Spotlight, window management) — they never reach page-world JavaScript, no matter how early you listen or whether you call `preventDefault`. Hotkey Router ships an **opt-in** reservation table that emits a soft warning at bind time, so the silent failure becomes a noisy one.
+
+The feature is opt-in by design: the core router stays ~3 KB gzipped, and the ~5 KB reservation data is tree-shaken out entirely unless you import it.
+
+### Two ways to opt in
+
+**One-line ergonomic** — use the `auto` entry. Same default export as `hotkey-router`, with warnings pre-installed:
 
 ```js
+import hotkeys from 'hotkey-router/auto'
+
 hotkeys.bind('meta+shift+f', toggleFullscreen)
 // Firefox on macOS:
-// [hotkey-router] "meta+shift+f" (meta+shift+f) reserved by firefox on macOS:
+// [hotkey-router] "meta+shift+f" reserved by firefox on macOS:
 //   "Toggle fullscreen" [hard] — will not fire.
 ```
 
-The warning is **never fatal** — the binding is still registered, in case you're running in a browser/platform where the conflict doesn't apply. Severities map to log levels:
+**Explicit install** — keep using the tiny core, install warnings yourself:
+
+```js
+import hotkeys from 'hotkey-router'
+import { installReservationWarnings } from 'hotkey-router/reservations'
+
+installReservationWarnings(hotkeys)
+hotkeys.bind('meta+shift+f', toggleFullscreen)
+```
+
+`installReservationWarnings()` returns an `uninstall` function if you ever need to detach. The warning is **never fatal** — the binding is still registered, in case you're running in a browser/platform where the conflict doesn't apply.
+
+### Severity → log level
 
 | Severity          | Log level | Meaning                                                 |
 | ----------------- | --------- | ------------------------------------------------------- |
@@ -116,24 +136,18 @@ The warning is **never fatal** — the binding is still registered, in case you'
 | `system-text`     | `info`    | Mac Ctrl+letter cursor controls inside text inputs.     |
 | `devtools-open`   | `info`    | Only relevant when DevTools is already open.            |
 
-### Opt out
-
-Globally at init:
-
-```js
-hotkeys.init({ warnOnReserved: false })
-```
-
-Per-binding:
+### Per-bind opt-out
 
 ```js
 hotkeys.bind('meta+shift+f', toggleFullscreen, null, { warnOnReserved: false })
 ```
 
+To turn warnings off globally, just don't install them (use the bare `hotkey-router` entry instead of `hotkey-router/auto`).
+
 ### Force a platform/browser (tests, SSR previews)
 
 ```js
-hotkeys.init({ platform: 'mac', browser: 'firefox' })
+installReservationWarnings(hotkeys, { platform: 'mac', browser: 'firefox' })
 ```
 
 Accepted platforms: `'mac' | 'windows' | 'linux'`. Browsers: `'firefox' | 'chrome' | 'safari' | 'edge'`.
@@ -149,13 +163,25 @@ Accepted platforms: `'mac' | 'windows' | 'linux'`. Browsers: `'firefox' | 'chrom
 If you want to query the table yourself (e.g. building a cheatsheet that flags conflicts):
 
 ```js
-import { lookupReservation, detectPlatform, detectBrowser } from 'hotkey-router/reservations.js'
+import { lookupReservation } from 'hotkey-router/reservations'
 
 const r = lookupReservation(
   { meta: true, shift: true, key: 'f' },
   { platform: 'mac', browser: 'firefox' }
 )
 // → { source: 'browser', action: 'Toggle fullscreen', severity: 'hard', ... }
+```
+
+### Extension hook (`onBind`)
+
+Reservation warnings are built on a public `onBind` hook — useful for telemetry, dev panels, or any cross-cutting concern that needs to observe every binding:
+
+```js
+const off = hotkeys.onBind(({ combo, raw, options, plugin, id }) => {
+  // combo: parsed combo { ctrl, meta, alt, shift, key, code, bareModifier }
+  // raw:   original hotkey string
+})
+// off() unsubscribes.
 ```
 
 ---
@@ -236,7 +262,7 @@ off()
   when?: (event) => boolean
   allowIn?: (event) => boolean
   priority?: number        // default 0
-  warnOnReserved?: boolean // default true; see "Conflict warnings"
+  warnOnReserved?: boolean // only read when conflict warnings are installed
 }
 ```
 
@@ -308,6 +334,21 @@ Remove all hotkeys associated with a plugin.
 
 ---
 
+## `onBind(hook)`
+
+Subscribe to bind events. The hook receives `{ combo, raw, options, plugin, id }` after every successful `bind()`. Returns an unsubscribe function. Used internally by `installReservationWarnings`; exposed for telemetry, dev panels, and custom validation.
+
+```js
+const off = hotkeys.onBind(({ raw }) => {
+  console.debug('bound:', raw)
+})
+// off() unsubscribes.
+```
+
+Hook errors are caught and logged via `console.error` — a buggy hook can't break the bind.
+
+---
+
 ## `pause()` / `resume()`
 
 Temporarily disable or re-enable all routing.
@@ -336,9 +377,6 @@ Manually attach listeners.
 hotkeys.init({
   target: window,
   capture: false,
-  warnOnReserved: true,     // emit console warnings for reserved combos
-  platform: undefined,      // override auto-detected 'mac' | 'windows' | 'linux'
-  browser: undefined,       // override auto-detected 'firefox' | 'chrome' | 'safari' | 'edge'
 })
 ```
 

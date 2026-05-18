@@ -19,7 +19,10 @@
       "import": "./dist/hotkey-router.js",
       "require": "./dist/hotkey-router.cjs"
     },
-    "./reservations.js": {
+    "./auto": {
+      "import": "./dist/auto.js"
+    },
+    "./reservations": {
       "import": "./dist/reservations.js"
     },
     "./data/browser-hotkeys.json": "./data/browser-hotkeys.json"

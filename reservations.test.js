@@ -8,6 +8,7 @@ import {
   formatReservationWarning,
   severityIsHard,
   severityIsSoft,
+  installReservationWarnings,
 } from './reservations.js'
 import hotkeys from './hotkey-router.js'
 
@@ -19,24 +20,24 @@ function combo({ ctrl = false, meta = false, alt = false, shift = false, key = n
 }
 
 // Programmatic bind helper that captures the warning/info message instead of
-// actually printing it. Returns the captured calls for assertion.
-function captureBind(hotkeyStr, { platform, browser, ...opts } = {}) {
+// actually printing it. Installs the reservation hook with explicit
+// platform/browser overrides, binds the combo, then uninstalls — so each
+// captureBind call is self-contained and never leaves a leaked hook behind.
+function captureBind(hotkeyStr, { platform, browser, install = true, ...opts } = {}) {
   const calls = { warn: [], info: [] }
   const fakeConsole = {
     warn: (...a) => calls.warn.push(a.join(' ')),
     info: (...a) => calls.info.push(a.join(' ')),
   }
-  const origWarn = console.warn
-  const origInfo = console.info
-  console.warn = fakeConsole.warn
-  console.info = fakeConsole.info
+  hotkeys.destroy()
+  hotkeys.init({ target: window })
+  const uninstall = install
+    ? installReservationWarnings(hotkeys, { platform, browser, console: fakeConsole })
+    : () => {}
   try {
-    hotkeys.destroy()
-    hotkeys.init({ target: window, platform, browser })
     hotkeys.bind(hotkeyStr, () => {}, null, opts)
   } finally {
-    console.warn = origWarn
-    console.info = origInfo
+    uninstall()
   }
   return calls
 }
@@ -265,24 +266,35 @@ describe('bind() conflict warnings', () => {
     expect(calls.warn[0]).toMatch(/Toggle fullscreen/)
   })
 
-  it('init({ warnOnReserved: false }) disables warnings globally', () => {
-    const origWarn = console.warn
-    const origInfo = console.info
-    const warns = []
-    const infos = []
-    console.warn = (m) => warns.push(m)
-    console.info = (m) => infos.push(m)
-    try {
-      hotkeys.destroy()
-      hotkeys.init({ target: window, platform: 'mac', browser: 'firefox', warnOnReserved: false })
-      hotkeys.bind('meta+shift+f', () => {})
-      hotkeys.bind('meta+shift+g', () => {})
-    } finally {
-      console.warn = origWarn
-      console.info = origInfo
-    }
-    expect(warns).toHaveLength(0)
-    expect(infos).toHaveLength(0)
+  it('not installing the hook means no warnings at all (default behavior)', () => {
+    // Without installReservationWarnings, the core router emits zero
+    // reservation warnings even on a known conflict. This is the tree-
+    // shakable default — devs pay nothing unless they opt in.
+    const calls = captureBind('meta+shift+f', {
+      platform: 'mac',
+      browser: 'firefox',
+      install: false,
+    })
+    expect(calls.warn).toHaveLength(0)
+    expect(calls.info).toHaveLength(0)
+  })
+
+  it('uninstall() removes the hook cleanly', () => {
+    const fakeConsole = { warn: vi.fn(), info: vi.fn() }
+    hotkeys.destroy()
+    hotkeys.init({ target: window })
+    const uninstall = installReservationWarnings(hotkeys, {
+      platform: 'mac',
+      browser: 'firefox',
+      console: fakeConsole,
+    })
+    hotkeys.bind('meta+shift+f', () => {})
+    expect(fakeConsole.warn).toHaveBeenCalledOnce()
+    uninstall()
+    hotkeys.bind('meta+shift+g', () => {})
+    // Second bind would have been a soft find-bar-only info — but uninstalled.
+    expect(fakeConsole.warn).toHaveBeenCalledOnce()
+    expect(fakeConsole.info).not.toHaveBeenCalled()
   })
 
   it('per-bind { warnOnReserved: false } disables warning for that bind only', () => {
@@ -301,16 +313,23 @@ describe('bind() conflict warnings', () => {
 
   it('binding still works after warning fires', () => {
     const handler = vi.fn()
-    const origWarn = console.warn
-    console.warn = () => {}
+    hotkeys.destroy()
+    hotkeys.init({ target: window })
+    const uninstall = installReservationWarnings(hotkeys, {
+      platform: 'mac',
+      browser: 'firefox',
+      console: { warn: () => {}, info: () => {} },
+    })
     try {
-      hotkeys.destroy()
-      hotkeys.init({ target: window, platform: 'mac', browser: 'firefox' })
       hotkeys.bind('meta+shift+f', handler)
       hotkeys.trigger('meta+shift+f')
     } finally {
-      console.warn = origWarn
+      uninstall()
     }
     expect(handler).toHaveBeenCalledOnce()
+  })
+
+  it('throws when called on something without onBind()', () => {
+    expect(() => installReservationWarnings({})).toThrow(/onBind/)
   })
 })

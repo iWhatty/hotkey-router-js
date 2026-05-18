@@ -6,13 +6,11 @@
 // - Deterministic routing: highest priority wins; ties -> most recently bound wins
 // - Safe plugin cleanup (never deletes other plugins’ bindings)
 // - Modern browser target (KeyboardEvent.key + addEventListener)
-
-import {
-  detectPlatform,
-  detectBrowser,
-  lookupReservation,
-  emitReservationWarning,
-} from './reservations.js'
+//
+// This core ships ZERO reservation data — opt in via `hotkey-router/auto`
+// or by calling `installReservationWarnings(hotkeys)` from the separate
+// `hotkey-router/reservations` module. Bundlers tree-shake the data file
+// out entirely when neither is imported.
 
 // --- tiny event helper ---
 function on(target, type, fn, options) {
@@ -101,20 +99,11 @@ const keyAliases = Object.freeze({
 // --- config ---
 let ignoreEditable = true
 let defaultTarget = typeof window !== 'undefined' ? window : null
-let warnOnReserved = true
-let reservationContext = { platform: undefined, browser: undefined }
 
-function currentReservationContext() {
-  // Detect lazily on first read so jsdom / SSR boots cleanly. `init()` can
-  // override either value (handy for tests that want to force a platform).
-  if (reservationContext.platform === undefined) {
-    reservationContext.platform = detectPlatform()
-  }
-  if (reservationContext.browser === undefined) {
-    reservationContext.browser = detectBrowser()
-  }
-  return reservationContext
-}
+// Bind hooks: subscribers called after each successful bind. Used by the
+// optional reservations module to emit conflict warnings without coupling
+// the core router to the (~5 KB) reservation table.
+let bindHooks = []
 
 // --- state ---
 // comboStr -> Map<type, Array<Binding>>
@@ -397,15 +386,15 @@ function bind(hotkeyStr, handler, plugin = null, options = {}) {
   ensureSlot(comboStr, type).push(binding)
   bindingIndex.set(binding.id, { comboStr, type })
 
-  // Soft conflict warning: tell the developer at bind time if this combo is
-  // reserved by the host browser/OS and won't reach page world. Never throws,
-  // never blocks the bind — the dev still gets their binding registered.
-  const shouldWarn = opts.warnOnReserved ?? warnOnReserved
-  if (shouldWarn) {
-    const { platform, browser } = currentReservationContext()
-    if (platform && browser) {
-      const reservation = lookupReservation(combo, { platform, browser })
-      if (reservation) emitReservationWarning(reservation, raw)
+  // Notify bind subscribers. Hook errors must never break the bind itself.
+  if (bindHooks.length) {
+    for (const hook of bindHooks) {
+      try {
+        hook({ combo, raw, options: opts, plugin, id: binding.id })
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error('[hotkey-router] onBind hook threw:', err)
+      }
     }
   }
 
@@ -413,6 +402,20 @@ function bind(hotkeyStr, handler, plugin = null, options = {}) {
   off.id = binding.id
   off.hotkey = raw
   return off
+}
+
+// Subscribe to bind events. The hook receives
+//   { combo, raw, options, plugin, id }
+// after the binding is registered. Returns an unsubscribe function. Used by
+// extensions like `installReservationWarnings` from `hotkey-router/reservations`.
+function onBind(hook) {
+  if (typeof hook !== 'function') {
+    throw new TypeError('hotkeys.onBind(hook) expects a function')
+  }
+  bindHooks.push(hook)
+  return () => {
+    bindHooks = bindHooks.filter((h) => h !== hook)
+  }
 }
 
 
@@ -548,19 +551,9 @@ function handleEvent(type) {
 let stopDown = null
 let stopUp = null
 
-function init({
-  target = defaultTarget,
-  capture = false,
-  warnOnReserved: warnOpt,
-  platform,
-  browser,
-} = {}) {
+function init({ target = defaultTarget, capture = false } = {}) {
   if (!target) throw new Error('hotkeys.init() requires a target (e.g. window)')
   if (stopDown || stopUp) destroy()
-
-  if (warnOpt !== undefined) warnOnReserved = !!warnOpt
-  if (platform !== undefined) reservationContext.platform = platform
-  if (browser !== undefined) reservationContext.browser = browser
 
   stopDown = on(target, 'keydown', handleEvent('keydown'), { capture })
   stopUp = on(target, 'keyup', handleEvent('keyup'), { capture })
@@ -575,10 +568,10 @@ function destroy() {
   registry.clear()
   plugins.clear()
   bindingIndex.clear()
-  // Reset reservation context so the next init() picks up freshly-detected
-  // (or explicitly overridden) platform/browser values.
-  reservationContext = { platform: undefined, browser: undefined }
-  warnOnReserved = true
+  // Note: bindHooks deliberately survive destroy(). Consumer extensions
+  // (reservations, future telemetry, etc.) install once at startup and
+  // shouldn't have to re-attach when the router restarts. Tests that need
+  // a clean slate should use the uninstall fn returned by their installer.
 }
 
 
@@ -660,6 +653,9 @@ export default {
   unbind,
   registerPlugin,
   unregisterPlugin,
+
+  // extension hooks
+  onBind,
 
   // control
   pause,

@@ -34,51 +34,73 @@ rmSync('dist', { recursive: true, force: true })
 mkdirSync('dist')
 
 const common = {
-  entryPoints: ['hotkey-router.js'],
   bundle: true,
   target: 'es2020',
-  // The JSON data file is plain data; bundle it inline.
   loader: { '.json': 'json' },
 }
 
-// --- ESM (readable + sourcemap) ---
+// --- Core router: ESM (readable + sourcemap) ---
+// Tiny mode. No reservation data. esbuild tree-shakes the data file out
+// because hotkey-router.js never imports it.
 await build({
   ...common,
+  entryPoints: ['hotkey-router.js'],
   outfile: 'dist/hotkey-router.js',
   format: 'esm',
   sourcemap: true,
   banner,
 })
 
-// --- ESM (minified) ---
+// --- Core router: ESM (minified) ---
 await build({
   ...common,
+  entryPoints: ['hotkey-router.js'],
   outfile: 'dist/hotkey-router.min.js',
   format: 'esm',
   minify: true,
   banner,
 })
 
-// --- CommonJS build ---
+// --- Core router: CommonJS ---
 await build({
   ...common,
+  entryPoints: ['hotkey-router.js'],
   outfile: 'dist/hotkey-router.cjs',
   format: 'cjs',
   sourcemap: true,
   banner,
 })
 
-// --- reservations standalone (ESM) ---
-// Lets consumers `import { lookupReservation } from 'hotkey-router/reservations.js'`
-// without pulling in the full router. JSON data is bundled inline.
+// --- Reservations module (ESM) ---
+// Lets consumers `import { installReservationWarnings, lookupReservation }
+// from 'hotkey-router/reservations'`. JSON data inlined.
 await build({
+  ...common,
   entryPoints: ['reservations.js'],
   outfile: 'dist/reservations.js',
   format: 'esm',
-  bundle: true,
-  target: 'es2020',
   sourcemap: true,
-  loader: { '.json': 'json' },
+  banner,
+})
+
+// --- Auto entry (ESM) ---
+// One-import: same default export as core, with warnings pre-installed.
+await build({
+  ...common,
+  entryPoints: ['auto.js'],
+  outfile: 'dist/auto.js',
+  format: 'esm',
+  sourcemap: true,
+  banner,
+})
+
+// --- Auto entry (minified, for CDN) ---
+await build({
+  ...common,
+  entryPoints: ['auto.js'],
+  outfile: 'dist/auto.min.js',
+  format: 'esm',
+  minify: true,
   banner,
 })
 
@@ -94,3 +116,5 @@ console.log('  ' + report('dist/hotkey-router.js'))
 console.log('  ' + report('dist/hotkey-router.min.js'))
 console.log('  ' + report('dist/hotkey-router.cjs'))
 console.log('  ' + report('dist/reservations.js'))
+console.log('  ' + report('dist/auto.js'))
+console.log('  ' + report('dist/auto.min.js'))
