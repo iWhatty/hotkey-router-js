@@ -8,12 +8,15 @@
 //  - dist/hotkey-router.cjs      (CommonJS for require() consumers)
 //
 // Notes:
-//  - We do NOT bundle (bundle: false) because this is a zero-dependency library.
+//  - We bundle (bundle: true) so the reservations data JSON is inlined into
+//    the dist files. Library is still zero-dependency — the only thing being
+//    pulled in is local `./reservations.js` + `./data/browser-hotkeys.json`.
 //  - We target modern environments (ES2020).
 //  - dist/ is fully recreated on every build to avoid stale artifacts.
 
 import { build } from 'esbuild'
-import { rmSync, mkdirSync, readFileSync } from 'node:fs'
+import { rmSync, mkdirSync, readFileSync, statSync } from 'node:fs'
+import { gzipSync } from 'node:zlib'
 
 // --- Read package metadata (robust across Node versions) ---
 const pkg = JSON.parse(
@@ -30,40 +33,64 @@ const banner = {
 rmSync('dist', { recursive: true, force: true })
 mkdirSync('dist')
 
-// --- ESM (readable + sourcemap) ---
-// Primary entry used by modern bundlers and Node ESM.
-await build({
+const common = {
   entryPoints: ['hotkey-router.js'],
+  bundle: true,
+  target: 'es2020',
+  // The JSON data file is plain data; bundle it inline.
+  loader: { '.json': 'json' },
+}
+
+// --- ESM (readable + sourcemap) ---
+await build({
+  ...common,
   outfile: 'dist/hotkey-router.js',
   format: 'esm',
-  bundle: false,
   sourcemap: true,
-  target: 'es2020',
   banner,
 })
 
 // --- ESM (minified) ---
-// Optimized for CDN usage and production delivery.
 await build({
-  entryPoints: ['hotkey-router.js'],
+  ...common,
   outfile: 'dist/hotkey-router.min.js',
   format: 'esm',
-  bundle: false,
   minify: true,
-  target: 'es2020',
   banner,
 })
 
 // --- CommonJS build ---
-// Enables require('hotkey-router') compatibility.
 await build({
-  entryPoints: ['hotkey-router.js'],
+  ...common,
   outfile: 'dist/hotkey-router.cjs',
   format: 'cjs',
-  bundle: false,
   sourcemap: true,
-  target: 'es2020',
   banner,
 })
 
+// --- reservations standalone (ESM) ---
+// Lets consumers `import { lookupReservation } from 'hotkey-router/reservations.js'`
+// without pulling in the full router. JSON data is bundled inline.
+await build({
+  entryPoints: ['reservations.js'],
+  outfile: 'dist/reservations.js',
+  format: 'esm',
+  bundle: true,
+  target: 'es2020',
+  sourcemap: true,
+  loader: { '.json': 'json' },
+  banner,
+})
+
+// --- Bundle size report ---
+const report = (file) => {
+  const raw = readFileSync(file)
+  const gz = gzipSync(raw)
+  return `${file}: ${raw.length} B raw, ${gz.length} B gzip`
+}
+
 console.log('✓ Built dist/')
+console.log('  ' + report('dist/hotkey-router.js'))
+console.log('  ' + report('dist/hotkey-router.min.js'))
+console.log('  ' + report('dist/hotkey-router.cjs'))
+console.log('  ' + report('dist/reservations.js'))

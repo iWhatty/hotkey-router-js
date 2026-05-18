@@ -14,8 +14,8 @@ It is a predictable, plugin-first routing layer for keyboard shortcuts.
 * 🎯 Deterministic winner selection (priority + recency)
 * 🛑 Input-safe by default
 * 🧪 Testable via `trigger()`
-* 📦 4.9 kB minified
-* 🗜  2.2 kB minified + gzipped
+* 🚨 Built-in browser/OS conflict warnings at bind time
+* 📦 ~7 kB minified + gzipped (incl. bundled reservation data)
 * 🚫 Zero dependencies
 
 ---
@@ -93,6 +93,73 @@ hotkeys.registerPlugin('docs', {
 })
 ```
 
+## Conflict warnings (v0.2.0+)
+
+Some combos are reserved by the browser chrome (find bar, devtools, bookmarks) or the OS (Spotlight, window management) — they never reach page-world JavaScript, no matter how early you listen or whether you call `preventDefault`. Hotkey Router bundles a per-platform/per-browser reservation table and emits a soft warning at **bind time** when you register one of these combos, so the silent failure becomes a noisy one.
+
+```js
+hotkeys.bind('meta+shift+f', toggleFullscreen)
+// Firefox on macOS:
+// [hotkey-router] "meta+shift+f" (meta+shift+f) reserved by firefox on macOS:
+//   "Toggle fullscreen" [hard] — will not fire.
+```
+
+The warning is **never fatal** — the binding is still registered, in case you're running in a browser/platform where the conflict doesn't apply. Severities map to log levels:
+
+| Severity          | Log level | Meaning                                                 |
+| ----------------- | --------- | ------------------------------------------------------- |
+| `hard`            | `warn`    | Browser intercepts before page world; combo won't fire. |
+| `os`              | `warn`    | OS intercepts globally.                                 |
+| `menu-activation` | `warn`    | Alt+letter activates the browser menu bar (Win/Linux).  |
+| `find-bar-only`   | `info`    | Reserved only when the find bar is focused.             |
+| `compose`         | `info`    | macOS Option+letter types a special char in inputs.     |
+| `system-text`     | `info`    | Mac Ctrl+letter cursor controls inside text inputs.     |
+| `devtools-open`   | `info`    | Only relevant when DevTools is already open.            |
+
+### Opt out
+
+Globally at init:
+
+```js
+hotkeys.init({ warnOnReserved: false })
+```
+
+Per-binding:
+
+```js
+hotkeys.bind('meta+shift+f', toggleFullscreen, null, { warnOnReserved: false })
+```
+
+### Force a platform/browser (tests, SSR previews)
+
+```js
+hotkeys.init({ platform: 'mac', browser: 'firefox' })
+```
+
+Accepted platforms: `'mac' | 'windows' | 'linux'`. Browsers: `'firefox' | 'chrome' | 'safari' | 'edge'`.
+
+### Caveats
+
+- Reservations reflect **default** keybindings. Users with custom shortcuts (Edge 95+ rebinds, Firefox add-ons, OS-level customization) may not match.
+- KDE/XFCE desktop reservations beyond GNOME are not yet catalogued — Linux coverage is conservative.
+- Layout-specific differences (Dvorak, AZERTY) change which physical key produces `event.key === 'f'`. For layout-stable bindings against the physical key, use `code:KeyX` syntax — the reservation lookup normalizes both.
+
+### Programmatic lookup
+
+If you want to query the table yourself (e.g. building a cheatsheet that flags conflicts):
+
+```js
+import { lookupReservation, detectPlatform, detectBrowser } from 'hotkey-router/reservations.js'
+
+const r = lookupReservation(
+  { meta: true, shift: true, key: 'f' },
+  { platform: 'mac', browser: 'firefox' }
+)
+// → { source: 'browser', action: 'Toggle fullscreen', severity: 'hard', ... }
+```
+
+---
+
 ## Bare-modifier bindings (v0.1.0+)
 
 Some UX patterns are driven by a bare modifier rather than a chord — e.g. "hold Alt to enter select mode, release Alt to exit."
@@ -164,11 +231,12 @@ off()
   preventDefault?: boolean
   stopPropagation?: boolean
   stopImmediatePropagation?: boolean
-  repeat?: boolean        // default false on keydown
+  repeat?: boolean         // default false on keydown
   once?: boolean
   when?: (event) => boolean
   allowIn?: (event) => boolean
-  priority?: number       // default 0
+  priority?: number        // default 0
+  warnOnReserved?: boolean // default true; see "Conflict warnings"
 }
 ```
 
@@ -268,6 +336,9 @@ Manually attach listeners.
 hotkeys.init({
   target: window,
   capture: false,
+  warnOnReserved: true,     // emit console warnings for reserved combos
+  platform: undefined,      // override auto-detected 'mac' | 'windows' | 'linux'
+  browser: undefined,       // override auto-detected 'firefox' | 'chrome' | 'safari' | 'edge'
 })
 ```
 

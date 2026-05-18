@@ -1,6 +1,6 @@
 {
   "name": "hotkey-router",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "A tiny, deterministic keyboard routing engine for modern web apps.",
   "type": "module",
   "author": "DR.WATT",
@@ -18,11 +18,16 @@
     ".": {
       "import": "./dist/hotkey-router.js",
       "require": "./dist/hotkey-router.cjs"
-    }
+    },
+    "./reservations.js": {
+      "import": "./dist/reservations.js"
+    },
+    "./data/browser-hotkeys.json": "./data/browser-hotkeys.json"
   },
   "sideEffects": false,
   "files": [
     "dist",
+    "data",
     "README.md",
     "LICENSE"
   ],
@@ -31,7 +36,9 @@
     "prepare": "node build.js",
     "prepublishOnly": "node build.js",
     "test": "vitest run --environment jsdom",
-    "test:watch": "vitest --environment jsdom"
+    "test:watch": "vitest --environment jsdom",
+    "scrape:diff": "node scripts/scrape-reservations.mjs",
+    "scrape:apply": "node scripts/scrape-reservations.mjs --apply"
   },
   "devDependencies": {
     "esbuild": "^0.21.0",
@@ -39,7 +46,7 @@
     "vitest": "^3.1.2"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   },
   "repository": {
     "type": "git",

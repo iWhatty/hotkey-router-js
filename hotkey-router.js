@@ -7,6 +7,13 @@
 // - Safe plugin cleanup (never deletes other plugins’ bindings)
 // - Modern browser target (KeyboardEvent.key + addEventListener)
 
+import {
+  detectPlatform,
+  detectBrowser,
+  lookupReservation,
+  emitReservationWarning,
+} from './reservations.js'
+
 // --- tiny event helper ---
 function on(target, type, fn, options) {
   target.addEventListener(type, fn, options)
@@ -94,6 +101,20 @@ const keyAliases = Object.freeze({
 // --- config ---
 let ignoreEditable = true
 let defaultTarget = typeof window !== 'undefined' ? window : null
+let warnOnReserved = true
+let reservationContext = { platform: undefined, browser: undefined }
+
+function currentReservationContext() {
+  // Detect lazily on first read so jsdom / SSR boots cleanly. `init()` can
+  // override either value (handy for tests that want to force a platform).
+  if (reservationContext.platform === undefined) {
+    reservationContext.platform = detectPlatform()
+  }
+  if (reservationContext.browser === undefined) {
+    reservationContext.browser = detectBrowser()
+  }
+  return reservationContext
+}
 
 // --- state ---
 // comboStr -> Map<type, Array<Binding>>
@@ -376,6 +397,18 @@ function bind(hotkeyStr, handler, plugin = null, options = {}) {
   ensureSlot(comboStr, type).push(binding)
   bindingIndex.set(binding.id, { comboStr, type })
 
+  // Soft conflict warning: tell the developer at bind time if this combo is
+  // reserved by the host browser/OS and won't reach page world. Never throws,
+  // never blocks the bind — the dev still gets their binding registered.
+  const shouldWarn = opts.warnOnReserved ?? warnOnReserved
+  if (shouldWarn) {
+    const { platform, browser } = currentReservationContext()
+    if (platform && browser) {
+      const reservation = lookupReservation(combo, { platform, browser })
+      if (reservation) emitReservationWarning(reservation, raw)
+    }
+  }
+
   const off = () => removeById(binding.id)
   off.id = binding.id
   off.hotkey = raw
@@ -515,9 +548,19 @@ function handleEvent(type) {
 let stopDown = null
 let stopUp = null
 
-function init({ target = defaultTarget, capture = false } = {}) {
+function init({
+  target = defaultTarget,
+  capture = false,
+  warnOnReserved: warnOpt,
+  platform,
+  browser,
+} = {}) {
   if (!target) throw new Error('hotkeys.init() requires a target (e.g. window)')
   if (stopDown || stopUp) destroy()
+
+  if (warnOpt !== undefined) warnOnReserved = !!warnOpt
+  if (platform !== undefined) reservationContext.platform = platform
+  if (browser !== undefined) reservationContext.browser = browser
 
   stopDown = on(target, 'keydown', handleEvent('keydown'), { capture })
   stopUp = on(target, 'keyup', handleEvent('keyup'), { capture })
@@ -532,6 +575,10 @@ function destroy() {
   registry.clear()
   plugins.clear()
   bindingIndex.clear()
+  // Reset reservation context so the next init() picks up freshly-detected
+  // (or explicitly overridden) platform/browser values.
+  reservationContext = { platform: undefined, browser: undefined }
+  warnOnReserved = true
 }
 
 
