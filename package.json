@@ -3,7 +3,7 @@
   "version": "0.2.0",
   "description": "A tiny, deterministic keyboard routing engine for modern web apps.",
   "type": "module",
-  "author": "DR.WATT",
+  "author": "WATT3D <WATT3D@protonmail.com>",
   "license": "SEE LICENSE IN LICENSE",
   "keywords": [
     "hotkeys",
